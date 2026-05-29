@@ -1,5 +1,4 @@
 import os
-import json
 import httpx
 from flask import Flask, request, jsonify
 
@@ -68,11 +67,11 @@ def create_wb_card(articul: str, title: str, description: str, category_code: st
     return response.json()
 
 
-def send_b24_message(user_id: str, text: str):
+def send_b24_message(dialog_id: str, text: str):
     url = f"{B24_WEBHOOK}/im.message.add.json"
-    print(f"Отправляю: URL={url}, DIALOG_ID={user_id}")
+    print(f"Отправляю: DIALOG_ID={dialog_id}")
     try:
-        resp = httpx.post(url, json={"DIALOG_ID": user_id, "MESSAGE": text}, timeout=10)
+        resp = httpx.post(url, json={"DIALOG_ID": dialog_id, "MESSAGE": text}, timeout=10)
         print(f"Ответ Битрикс: {resp.status_code} {resp.text}")
     except Exception as e:
         print(f"Ошибка отправки: {e}")
@@ -107,32 +106,33 @@ def index():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        print("=== INCOMING REQUEST ===")
-        print("Content-Type:", request.content_type)
-
         if request.content_type and 'application/json' in request.content_type:
             data = request.json or {}
         else:
             data = request.form.to_dict()
 
-        print("Form data:", data)
-
-        # Берём ID пользователя — отправляем ответ в личный чат с ботом
-        user_id = data.get("data[PARAMS][FROM_USER_ID]", "").strip()
-        if not user_id:
-            user_id = data.get("data[USER][ID]", "").strip()
-
+        # Получаем ID чата и пользователя
+        chat_id = data.get("data[PARAMS][DIALOG_ID]", "").strip()
+        from_user_id = data.get("data[PARAMS][FROM_USER_ID]", "").strip()
         text = data.get("data[PARAMS][MESSAGE]", "").strip()
-        if not text:
-            text = data.get("data[MESSAGE]", "").strip()
 
-        print(f"user_id={user_id}, text={text}")
+        print(f"chat_id={chat_id}, from_user_id={from_user_id}, text={text}")
 
-        if not text or not user_id:
+        # Используем chat_id если это не личный диалог (не совпадает с from_user_id)
+        # Иначе используем формат для личного чата с ботом
+        if chat_id and chat_id != from_user_id:
+            dialog_id = chat_id
+        else:
+            dialog_id = from_user_id
+
+        if not text or not dialog_id:
             return jsonify({"ok": True})
 
+        # Используем from_user_id как ключ для состояния
+        state_key = from_user_id or dialog_id
+
         if text.lower() in ["помощь", "help", "/help", "start", "/start"]:
-            send_b24_message(user_id,
+            send_b24_message(dialog_id,
                 "👋 Привет! Я создаю артикулы и карточки товаров на Wildberries.\n\n"
                 "Напиши мне в таком формате:\n\n"
                 "категория: худи\n"
@@ -144,14 +144,14 @@ def webhook():
             )
             return jsonify({"ok": True})
 
-        if user_id in user_states:
-            state = user_states[user_id]
+        if state_key in user_states:
+            state = user_states[state_key]
             try:
                 model_num = int(text)
                 if model_num < 1:
                     raise ValueError
             except ValueError:
-                send_b24_message(user_id, "❌ Введи просто число, например: 3")
+                send_b24_message(dialog_id, "❌ Введи просто число, например: 3")
                 return jsonify({"ok": True})
 
             category_code = state["category_code"]
@@ -159,20 +159,20 @@ def webhook():
             title = state["title"]
 
             articul = generate_articul(category_code, model_num, color)
-            send_b24_message(user_id, f"⏳ Генерирую описание и создаю карточку...\nАртикул: {articul}")
+            send_b24_message(dialog_id, f"⏳ Генерирую описание и создаю карточку...\nАртикул: {articul}")
 
             description = generate_description(title, WB_CATEGORIES.get(category_code, ""), color)
             result = create_wb_card(articul, title, description, category_code, color)
 
-            del user_states[user_id]
+            del user_states[state_key]
 
             if result.get("error"):
-                send_b24_message(user_id,
+                send_b24_message(dialog_id,
                     f"❌ Ошибка WB: {result.get('errorText', 'неизвестная ошибка')}\n"
                     f"Артикул {articul} сгенерирован, но карточка не создана."
                 )
             else:
-                send_b24_message(user_id,
+                send_b24_message(dialog_id,
                     f"✅ Готово!\n\n"
                     f"Артикул: {articul}\n"
                     f"Название: {title}\n\n"
@@ -183,13 +183,13 @@ def webhook():
 
         parsed = parse_first_message(text)
         if not parsed:
-            send_b24_message(user_id,
+            send_b24_message(dialog_id,
                 "❌ Не понял формат. Напиши 'помощь' чтобы увидеть пример."
             )
             return jsonify({"ok": True})
 
-        user_states[user_id] = parsed
-        send_b24_message(user_id,
+        user_states[state_key] = parsed
+        send_b24_message(dialog_id,
             f"📦 Категория: {WB_CATEGORIES.get(parsed['category_code'])}\n"
             f"Цвет: {parsed['color']}\n"
             f"Название: {parsed['title']}\n\n"
@@ -205,4 +205,3 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
