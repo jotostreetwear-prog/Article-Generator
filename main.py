@@ -1,20 +1,14 @@
-
 import os
 import json
 import httpx
 from flask import Flask, request, jsonify
-import anthropic
 
 app = Flask(__name__)
 
-# === НАСТРОЙКИ ===
 WB_API_TOKEN = os.environ.get("WB_API_TOKEN", "")
 B24_WEBHOOK = os.environ.get("B24_WEBHOOK", "")
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
-claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
-# Категории JOTO
 CATEGORIES = {
     "жилет": "01", "жилеты": "01",
     "куртка": "02", "куртки": "02",
@@ -34,7 +28,6 @@ WB_CATEGORIES = {
     "07": "Лонгсливы", "09": "Брюки", "10": "Шорты", "11": "Футболки",
 }
 
-# Хранилище состояний пользователей (в памяти)
 user_states = {}
 
 
@@ -43,21 +36,15 @@ def generate_articul(category_code: str, model_num: int, color: str) -> str:
 
 
 def generate_description(title: str, category: str, color: str) -> str:
-    """Генерирует описание товара через Claude"""
     prompt = (
         f"Напиши короткое продающее описание товара для карточки на Wildberries.\n"
-        f"Товар: {title}\n"
-        f"Категория: {category}\n"
-        f"Цвет: {color}\n"
-        f"Требования: 2-3 предложения, без лишних слов, на русском языке. "
-        f"Упомяни бренд Joto. Только текст описания, без заголовков."
+        f"Товар: {title}\nКатегория: {category}\nЦвет: {color}\n"
+        f"Требования: 2-3 предложения, на русском, упомяни бренд Joto. Только текст, без заголовков."
     )
-    message = claude.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=300,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return message.content[0].text.strip()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+    resp = httpx.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=30)
+    data = resp.json()
+    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 
 def create_wb_card(articul: str, title: str, description: str, category_code: str, color: str) -> dict:
@@ -70,18 +57,13 @@ def create_wb_card(articul: str, title: str, description: str, category_code: st
             "description": description,
             "brand": "Joto",
             "dimensions": {"length": 30, "width": 20, "height": 5},
-            "characteristics": [
-                {"Цвет": [color]},
-                {"Бренд": ["Joto"]},
-            ]
+            "characteristics": [{"Цвет": [color]}, {"Бренд": ["Joto"]}]
         }]
     }
     headers = {"Authorization": WB_API_TOKEN, "Content-Type": "application/json"}
     response = httpx.post(
         "https://content-api.wildberries.ru/content/v2/cards/upload",
-        json=[payload],
-        headers=headers,
-        timeout=30
+        json=[payload], headers=headers, timeout=30
     )
     return response.json()
 
@@ -95,7 +77,6 @@ def send_b24_message(user_id: str, text: str):
 
 
 def parse_first_message(text: str) -> dict | None:
-    """Парсит первое сообщение: категория, цвет, название"""
     lines = text.lower().strip().split("\n")
     data = {}
     for line in lines:
@@ -133,7 +114,6 @@ def webhook():
 
         text = text.strip()
 
-        # Команда помощи
         if text.lower() in ["помощь", "help", "/help", "start", "/start"]:
             send_b24_message(user_id,
                 "👋 Привет! Я создаю артикулы и карточки товаров на Wildberries.\n\n"
@@ -147,7 +127,6 @@ def webhook():
             )
             return jsonify({"ok": True})
 
-        # Пользователь отвечает на вопрос о номере модели
         if user_id in user_states:
             state = user_states[user_id]
             try:
@@ -158,7 +137,6 @@ def webhook():
                 send_b24_message(user_id, "❌ Введи просто число, например: 3")
                 return jsonify({"ok": True})
 
-            # Всё есть — генерируем
             category_code = state["category_code"]
             color = state["color"]
             title = state["title"]
@@ -186,7 +164,6 @@ def webhook():
                 )
             return jsonify({"ok": True})
 
-        # Первое сообщение — парсим категорию/цвет/название
         parsed = parse_first_message(text)
         if not parsed:
             send_b24_message(user_id,
@@ -194,7 +171,6 @@ def webhook():
             )
             return jsonify({"ok": True})
 
-        # Сохраняем состояние и спрашиваем номер модели
         user_states[user_id] = parsed
         send_b24_message(user_id,
             f"📦 Категория: {WB_CATEGORIES.get(parsed['category_code'])}\n"
