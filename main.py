@@ -71,7 +71,7 @@ def send_b24_message(dialog_id: str, text: str):
     url = f"{B24_WEBHOOK}/im.message.add.json"
     print(f"Отправляю: DIALOG_ID={dialog_id}")
     try:
-        resp = httpx.post(url, json={"DIALOG_ID": dialog_id, "MESSAGE": text}, timeout=10)
+      resp = httpx.post(url, json={"USER_ID": dialog_id, "MESSAGE": text}, timeout=10)
         print(f"Ответ Битрикс: {resp.status_code} {resp.text}")
     except Exception as e:
         print(f"Ошибка отправки: {e}")
