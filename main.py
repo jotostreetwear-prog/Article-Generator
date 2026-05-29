@@ -2,13 +2,13 @@ import os
 import json
 import httpx
 from flask import Flask, request, jsonify
-
+ 
 app = Flask(__name__)
-
+ 
 WB_API_TOKEN = os.environ.get("WB_API_TOKEN", "")
 B24_WEBHOOK = os.environ.get("B24_WEBHOOK", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-
+ 
 CATEGORIES = {
     "жилет": "01", "жилеты": "01",
     "куртка": "02", "куртки": "02",
@@ -21,20 +21,20 @@ CATEGORIES = {
     "шорты": "10", "шорт": "10",
     "футболка": "11", "футболки": "11",
 }
-
+ 
 WB_CATEGORIES = {
     "01": "Жилеты", "02": "Куртки", "03": "Водолазки",
     "04": "Джинсы", "05": "Худи", "06": "Свитеры",
     "07": "Лонгсливы", "09": "Брюки", "10": "Шорты", "11": "Футболки",
 }
-
+ 
 user_states = {}
-
-
+ 
+ 
 def generate_articul(category_code: str, model_num: int, color: str) -> str:
     return f"J{category_code}{str(model_num).zfill(3)}/{color.lower().strip()}"
-
-
+ 
+ 
 def generate_description(title: str, category: str, color: str) -> str:
     prompt = (
         f"Напиши короткое продающее описание товара для карточки на Wildberries.\n"
@@ -45,8 +45,8 @@ def generate_description(title: str, category: str, color: str) -> str:
     resp = httpx.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=30)
     data = resp.json()
     return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-
-
+ 
+ 
 def create_wb_card(articul: str, title: str, description: str, category_code: str, color: str) -> dict:
     wb_category = WB_CATEGORIES.get(category_code, "Одежда")
     payload = {
@@ -66,16 +66,16 @@ def create_wb_card(articul: str, title: str, description: str, category_code: st
         json=[payload], headers=headers, timeout=30
     )
     return response.json()
-
-
+ 
+ 
 def send_b24_message(user_id: str, text: str):
     httpx.post(
         f"{B24_WEBHOOK}/im.message.add.json",
         json={"DIALOG_ID": user_id, "MESSAGE": text},
         timeout=10
     )
-
-
+ 
+ 
 def parse_first_message(text: str) -> dict | None:
     lines = text.lower().strip().split("\n")
     data = {}
@@ -83,37 +83,41 @@ def parse_first_message(text: str) -> dict | None:
         if ":" in line:
             key, _, val = line.partition(":")
             data[key.strip()] = val.strip()
-
+ 
     category_word = data.get("категория", "")
     category_code = CATEGORIES.get(category_word)
     if not category_code:
         return None
-
+ 
     color = data.get("цвет", "")
     title = data.get("название", "")
     if not color or not title:
         return None
-
+ 
     return {"category_code": category_code, "color": color, "title": title}
-
-
+ 
+ 
 @app.route("/", methods=["GET"])
 def index():
     return "JOTO Bot работает ✓"
-
-
+ 
+ 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        data = request.json or request.form.to_dict()
-        user_id = data.get("data[USER][ID]") or data.get("USER_ID", "")
-        text = data.get("data[MESSAGE]") or data.get("MESSAGE", "")
-
+        if request.content_type and 'application/json' in request.content_type:
+            data = request.json or {}
+        else:
+            data = request.form.to_dict()
+ 
+        user_id = (data.get("data[USER][ID]") or data.get("USER_ID", "")).strip()
+        text = (data.get("data[MESSAGE]") or data.get("MESSAGE", "")).strip()
+ 
         if not text:
             return jsonify({"ok": True})
-
+ 
         text = text.strip()
-
+ 
         if text.lower() in ["помощь", "help", "/help", "start", "/start"]:
             send_b24_message(user_id,
                 "👋 Привет! Я создаю артикулы и карточки товаров на Wildberries.\n\n"
@@ -126,7 +130,7 @@ def webhook():
                 "свитер, лонгслив, брюки, шорты, футболка"
             )
             return jsonify({"ok": True})
-
+ 
         if user_id in user_states:
             state = user_states[user_id]
             try:
@@ -136,19 +140,19 @@ def webhook():
             except ValueError:
                 send_b24_message(user_id, "❌ Введи просто число, например: 3")
                 return jsonify({"ok": True})
-
+ 
             category_code = state["category_code"]
             color = state["color"]
             title = state["title"]
-
+ 
             articul = generate_articul(category_code, model_num, color)
             send_b24_message(user_id, f"⏳ Генерирую описание и создаю карточку...\nАртикул: {articul}")
-
+ 
             description = generate_description(title, WB_CATEGORIES.get(category_code, ""), color)
             result = create_wb_card(articul, title, description, category_code, color)
-
+ 
             del user_states[user_id]
-
+ 
             if result.get("error"):
                 send_b24_message(user_id,
                     f"❌ Ошибка WB: {result.get('errorText', 'неизвестная ошибка')}\n"
@@ -163,14 +167,14 @@ def webhook():
                     f"Карточка создана на Wildberries!"
                 )
             return jsonify({"ok": True})
-
+ 
         parsed = parse_first_message(text)
         if not parsed:
             send_b24_message(user_id,
                 "❌ Не понял формат. Напиши 'помощь' чтобы увидеть пример."
             )
             return jsonify({"ok": True})
-
+ 
         user_states[user_id] = parsed
         send_b24_message(user_id,
             f"📦 Категория: {WB_CATEGORIES.get(parsed['category_code'])}\n"
@@ -178,13 +182,13 @@ def webhook():
             f"Название: {parsed['title']}\n\n"
             f"Это какая модель по счёту? (введи число, например: 3)"
         )
-
+ 
     except Exception as e:
         print(f"Ошибка: {e}")
-
+ 
     return jsonify({"ok": True})
-
-
+ 
+ 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
