@@ -68,10 +68,13 @@ def create_wb_card(articul: str, title: str, description: str, category_code: st
 
 
 def send_b24_message(dialog_id: str, text: str):
-    url = f"{B24_WEBHOOK}/im.message.add.json"
     print(f"Отправляю: DIALOG_ID={dialog_id}")
     try:
-      resp = httpx.post(url, json={"USER_ID": dialog_id, "MESSAGE": text}, timeout=10)
+        resp = httpx.post(
+            f"{B24_WEBHOOK}/imbot.message.add.json",
+            json={"BOT_ID": 316, "DIALOG_ID": dialog_id, "MESSAGE": text},
+            timeout=10
+        )
         print(f"Ответ Битрикс: {resp.status_code} {resp.text}")
     except Exception as e:
         print(f"Ошибка отправки: {e}")
@@ -111,24 +114,15 @@ def webhook():
         else:
             data = request.form.to_dict()
 
-        # Получаем ID чата и пользователя
-        chat_id = data.get("data[PARAMS][DIALOG_ID]", "").strip()
+        dialog_id = data.get("data[PARAMS][DIALOG_ID]", "").strip()
         from_user_id = data.get("data[PARAMS][FROM_USER_ID]", "").strip()
         text = data.get("data[PARAMS][MESSAGE]", "").strip()
 
-        print(f"chat_id={chat_id}, from_user_id={from_user_id}, text={text}")
-
-        # Используем chat_id если это не личный диалог (не совпадает с from_user_id)
-        # Иначе используем формат для личного чата с ботом
-        if chat_id and chat_id != from_user_id:
-            dialog_id = chat_id
-        else:
-            dialog_id = from_user_id
+        print(f"dialog_id={dialog_id}, from_user_id={from_user_id}, text={text}")
 
         if not text or not dialog_id:
             return jsonify({"ok": True})
 
-        # Используем from_user_id как ключ для состояния
         state_key = from_user_id or dialog_id
 
         if text.lower() in ["помощь", "help", "/help", "start", "/start"]:
