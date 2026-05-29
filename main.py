@@ -107,27 +107,29 @@ def index():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        # ДЕБАГ - логируем всё что приходит
         print("=== INCOMING REQUEST ===")
         print("Content-Type:", request.content_type)
-        print("Form data:", request.form.to_dict())
-        print("JSON data:", request.get_json(silent=True))
-        print("Raw:", request.data.decode('utf-8', errors='ignore'))
-        print("========================")
 
         if request.content_type and 'application/json' in request.content_type:
             data = request.json or {}
         else:
             data = request.form.to_dict()
 
-       chat_id = data.get("data[PARAMS][TO_CHAT_ID]", "")
-user_id = f"chat{chat_id}" if chat_id else (data.get("data[PARAMS][DIALOG_ID]") or data.get("USER_ID", "")).strip()
-        text = (data.get("data[PARAMS][MESSAGE]") or data.get("data[MESSAGE]") or data.get("MESSAGE", "")).strip()
+        print("Form data:", data)
 
+        # Берём ID пользователя — отправляем ответ в личный чат с ботом
+        user_id = data.get("data[PARAMS][FROM_USER_ID]", "").strip()
+        if not user_id:
+            user_id = data.get("data[USER][ID]", "").strip()
+
+        text = data.get("data[PARAMS][MESSAGE]", "").strip()
         if not text:
-            return jsonify({"ok": True})
+            text = data.get("data[MESSAGE]", "").strip()
 
-        text = text.strip()
+        print(f"user_id={user_id}, text={text}")
+
+        if not text or not user_id:
+            return jsonify({"ok": True})
 
         if text.lower() in ["помощь", "help", "/help", "start", "/start"]:
             send_b24_message(user_id,
