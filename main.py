@@ -120,7 +120,8 @@ def webhook():
         else:
             data = request.form.to_dict()
 
-        user_id = (data.get("data[PARAMS][TO_CHAT_ID]") or data.get("data[PARAMS][DIALOG_ID]") or data.get("USER_ID", "")).strip()
+       chat_id = data.get("data[PARAMS][TO_CHAT_ID]", "")
+user_id = f"chat{chat_id}" if chat_id else (data.get("data[PARAMS][DIALOG_ID]") or data.get("USER_ID", "")).strip()
         text = (data.get("data[PARAMS][MESSAGE]") or data.get("data[MESSAGE]") or data.get("MESSAGE", "")).strip()
 
         if not text:
