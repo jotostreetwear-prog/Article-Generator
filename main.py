@@ -69,11 +69,13 @@ def create_wb_card(articul: str, title: str, description: str, category_code: st
 
 
 def send_b24_message(user_id: str, text: str):
-    httpx.post(
-        f"{B24_WEBHOOK}/im.message.add.json",
-        json={"DIALOG_ID": user_id, "MESSAGE": text},
-        timeout=10
-    )
+    url = f"{B24_WEBHOOK}/im.message.add.json"
+    print(f"Отправляю: URL={url}, DIALOG_ID={user_id}")
+    try:
+        resp = httpx.post(url, json={"DIALOG_ID": user_id, "MESSAGE": text}, timeout=10)
+        print(f"Ответ Битрикс: {resp.status_code} {resp.text}")
+    except Exception as e:
+        print(f"Ошибка отправки: {e}")
 
 
 def parse_first_message(text: str) -> dict | None:
@@ -200,3 +202,4 @@ def webhook():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+
