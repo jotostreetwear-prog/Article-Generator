@@ -105,13 +105,21 @@ def index():
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        if request.content_type and 'application/json' in request.content_type:
-            data = request.json or {}
-        else:
-            data = request.form.to_dict()
- 
-        user_id = (data.get("data[USER][ID]") or data.get("USER_ID", "")).strip()
-        text = (data.get("data[MESSAGE]") or data.get("MESSAGE", "")).strip()
+            # ДЕБАГ
+            print("=== INCOMING REQUEST ===")
+            print("Content-Type:", request.content_type)
+            print("Form data:", request.form.to_dict())
+            print("JSON data:", request.get_json(silent=True))
+            print("Raw:", request.data.decode('utf-8', errors='ignore'))
+            print("========================")
+
+            if request.content_type and 'application/json' in request.content_type:
+                data = request.json or {}
+            else:
+                data = request.form.to_dict()
+
+            user_id = (data.get("data[USER][ID]") or data.get("USER_ID", "")).strip()
+            text = (data.get("data[MESSAGE]") or data.get("MESSAGE", "")).strip()
  
         if not text:
             return jsonify({"ok": True})
