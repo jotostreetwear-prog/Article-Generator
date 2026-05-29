@@ -1,13 +1,18 @@
+
 import os
 import json
 import httpx
 from flask import Flask, request, jsonify
+import anthropic
 
 app = Flask(__name__)
 
-# === НАСТРОЙКИ — вставь свои ключи ===
-WB_API_TOKEN = os.environ.get("WB_API_TOKEN", "ВСТАВЬ_ТОКЕН_WB_СЮДА")
-B24_WEBHOOK = os.environ.get("B24_WEBHOOK", "ВСТАВЬ_ВЕБХУК_БИТРИКСА_СЮДА")
+# === НАСТРОЙКИ ===
+WB_API_TOKEN = os.environ.get("WB_API_TOKEN", "")
+B24_WEBHOOK = os.environ.get("B24_WEBHOOK", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
+claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 # Категории JOTO
 CATEGORIES = {
@@ -24,66 +29,64 @@ CATEGORIES = {
 }
 
 WB_CATEGORIES = {
-    "01": "Жилеты",
-    "02": "Куртки",
-    "03": "Водолазки",
-    "04": "Джинсы",
-    "05": "Худи",
-    "06": "Свитеры",
-    "07": "Лонгсливы",
-    "09": "Брюки",
-    "10": "Шорты",
-    "11": "Футболки",
+    "01": "Жилеты", "02": "Куртки", "03": "Водолазки",
+    "04": "Джинсы", "05": "Худи", "06": "Свитеры",
+    "07": "Лонгсливы", "09": "Брюки", "10": "Шорты", "11": "Футболки",
 }
+
+# Хранилище состояний пользователей (в памяти)
+user_states = {}
 
 
 def generate_articul(category_code: str, model_num: int, color: str) -> str:
-    """Генерирует артикул по правилам JOTO: J + код + номер модели + /цвет"""
     return f"J{category_code}{str(model_num).zfill(3)}/{color.lower().strip()}"
 
 
-def create_wb_card(articul: str, title: str, category_code: str, color: str) -> dict:
-    """Создаёт карточку товара на Wildberries"""
-    wb_category = WB_CATEGORIES.get(category_code, "Одежда")
+def generate_description(title: str, category: str, color: str) -> str:
+    """Генерирует описание товара через Claude"""
+    prompt = (
+        f"Напиши короткое продающее описание товара для карточки на Wildberries.\n"
+        f"Товар: {title}\n"
+        f"Категория: {category}\n"
+        f"Цвет: {color}\n"
+        f"Требования: 2-3 предложения, без лишних слов, на русском языке. "
+        f"Упомяни бренд Joto. Только текст описания, без заголовков."
+    )
+    message = claude.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=300,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return message.content[0].text.strip()
 
+
+def create_wb_card(articul: str, title: str, description: str, category_code: str, color: str) -> dict:
+    wb_category = WB_CATEGORIES.get(category_code, "Одежда")
     payload = {
         "subjectName": wb_category,
-        "variants": [
-            {
-                "vendorCode": articul,
-                "title": title,
-                "description": f"{title}. Артикул: {articul}",
-                "brand": "Joto",
-                "dimensions": {
-                    "length": 30,
-                    "width": 20,
-                    "height": 5
-                },
-                "characteristics": [
-                    {"Цвет": [color]},
-                    {"Бренд": ["Joto"]},
-                ]
-            }
-        ]
+        "variants": [{
+            "vendorCode": articul,
+            "title": title,
+            "description": description,
+            "brand": "Joto",
+            "dimensions": {"length": 30, "width": 20, "height": 5},
+            "characteristics": [
+                {"Цвет": [color]},
+                {"Бренд": ["Joto"]},
+            ]
+        }]
     }
-
-    headers = {
-        "Authorization": WB_API_TOKEN,
-        "Content-Type": "application/json"
-    }
-
+    headers = {"Authorization": WB_API_TOKEN, "Content-Type": "application/json"}
     response = httpx.post(
         "https://content-api.wildberries.ru/content/v2/cards/upload",
         json=[payload],
         headers=headers,
         timeout=30
     )
-
     return response.json()
 
 
 def send_b24_message(user_id: str, text: str):
-    """Отправляет сообщение пользователю в Битрикс24"""
     httpx.post(
         f"{B24_WEBHOOK}/im.message.add.json",
         json={"DIALOG_ID": user_id, "MESSAGE": text},
@@ -91,15 +94,8 @@ def send_b24_message(user_id: str, text: str):
     )
 
 
-def parse_message(text: str) -> dict | None:
-    """
-    Парсит сообщение от пользователя.
-    Ожидаемый формат:
-    категория: худи
-    модель: 3
-    цвет: black
-    название: Худи оверсайз мужское
-    """
+def parse_first_message(text: str) -> dict | None:
+    """Парсит первое сообщение: категория, цвет, название"""
     lines = text.lower().strip().split("\n")
     data = {}
     for line in lines:
@@ -112,23 +108,12 @@ def parse_message(text: str) -> dict | None:
     if not category_code:
         return None
 
-    try:
-        model_num = int(data.get("модель", "0"))
-    except ValueError:
-        return None
-
     color = data.get("цвет", "")
     title = data.get("название", "")
-
-    if not all([category_code, model_num, color, title]):
+    if not color or not title:
         return None
 
-    return {
-        "category_code": category_code,
-        "model_num": model_num,
-        "color": color,
-        "title": title
-    }
+    return {"category_code": category_code, "color": color, "title": title}
 
 
 @app.route("/", methods=["GET"])
@@ -138,7 +123,6 @@ def index():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Обработчик сообщений от Битрикс24"""
     try:
         data = request.json or request.form.to_dict()
         user_id = data.get("data[USER][ID]") or data.get("USER_ID", "")
@@ -149,13 +133,12 @@ def webhook():
 
         text = text.strip()
 
-        # Помощь
+        # Команда помощи
         if text.lower() in ["помощь", "help", "/help", "start", "/start"]:
             send_b24_message(user_id,
                 "👋 Привет! Я создаю артикулы и карточки товаров на Wildberries.\n\n"
                 "Напиши мне в таком формате:\n\n"
                 "категория: худи\n"
-                "модель: 3\n"
                 "цвет: black\n"
                 "название: Худи оверсайз мужское\n\n"
                 "Доступные категории:\n"
@@ -164,45 +147,61 @@ def webhook():
             )
             return jsonify({"ok": True})
 
-        # Парсим сообщение
-        parsed = parse_message(text)
+        # Пользователь отвечает на вопрос о номере модели
+        if user_id in user_states:
+            state = user_states[user_id]
+            try:
+                model_num = int(text)
+                if model_num < 1:
+                    raise ValueError
+            except ValueError:
+                send_b24_message(user_id, "❌ Введи просто число, например: 3")
+                return jsonify({"ok": True})
 
+            # Всё есть — генерируем
+            category_code = state["category_code"]
+            color = state["color"]
+            title = state["title"]
+
+            articul = generate_articul(category_code, model_num, color)
+            send_b24_message(user_id, f"⏳ Генерирую описание и создаю карточку...\nАртикул: {articul}")
+
+            description = generate_description(title, WB_CATEGORIES.get(category_code, ""), color)
+            result = create_wb_card(articul, title, description, category_code, color)
+
+            del user_states[user_id]
+
+            if result.get("error"):
+                send_b24_message(user_id,
+                    f"❌ Ошибка WB: {result.get('errorText', 'неизвестная ошибка')}\n"
+                    f"Артикул {articul} сгенерирован, но карточка не создана."
+                )
+            else:
+                send_b24_message(user_id,
+                    f"✅ Готово!\n\n"
+                    f"Артикул: {articul}\n"
+                    f"Название: {title}\n\n"
+                    f"Описание:\n{description}\n\n"
+                    f"Карточка создана на Wildberries!"
+                )
+            return jsonify({"ok": True})
+
+        # Первое сообщение — парсим категорию/цвет/название
+        parsed = parse_first_message(text)
         if not parsed:
             send_b24_message(user_id,
                 "❌ Не понял формат. Напиши 'помощь' чтобы увидеть пример."
             )
             return jsonify({"ok": True})
 
-        # Генерируем артикул
-        articul = generate_articul(
-            parsed["category_code"],
-            parsed["model_num"],
-            parsed["color"]
+        # Сохраняем состояние и спрашиваем номер модели
+        user_states[user_id] = parsed
+        send_b24_message(user_id,
+            f"📦 Категория: {WB_CATEGORIES.get(parsed['category_code'])}\n"
+            f"Цвет: {parsed['color']}\n"
+            f"Название: {parsed['title']}\n\n"
+            f"Это какая модель по счёту? (введи число, например: 3)"
         )
-
-        send_b24_message(user_id, f"⏳ Создаю карточку товара...\nАртикул: {articul}")
-
-        # Создаём карточку на WB
-        result = create_wb_card(
-            articul,
-            parsed["title"],
-            parsed["category_code"],
-            parsed["color"]
-        )
-
-        # Проверяем результат
-        if result.get("error"):
-            send_b24_message(user_id,
-                f"❌ Ошибка WB: {result.get('errorText', 'неизвестная ошибка')}\n"
-                f"Артикул {articul} сгенерирован, но карточка не создана."
-            )
-        else:
-            send_b24_message(user_id,
-                f"✅ Готово!\n\n"
-                f"Артикул: {articul}\n"
-                f"Название: {parsed['title']}\n"
-                f"Карточка создана на Wildberries!"
-            )
 
     except Exception as e:
         print(f"Ошибка: {e}")
