@@ -1,5 +1,4 @@
 import os
-import json
 import httpx
 import threading
 import schedule
@@ -12,27 +11,29 @@ app = Flask(__name__)
 
 WB_API_TOKEN = os.environ.get("WB_API_TOKEN", "").strip()
 B24_WEBHOOK = os.environ.get("B24_WEBHOOK", "").strip()
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
-# Категории артикулов
+# Категории по инструкции JOTO
 CATEGORIES = {
     "жилет": "01",
-    "толстовка": "02",
-    "свитшот": "03",
+    "жилеты": "01",
+    "куртка": "02",
+    "куртки": "02",
+    "водолазка": "03",
+    "водолазки": "03",
+    "джинсы": "04",
     "худи": "05",
-    "футболка": "06",
+    "свитер": "06",
+    "свитера": "06",
     "лонгслив": "07",
-    "шорты": "08",
-    "штаны": "09",
-    "куртка": "10",
-    "пальто": "11",
-    "платье": "12",
-    "юбка": "13",
-    "кардиган": "14",
-    "рубашка": "15",
-    "пиджак": "16",
+    "лонгсливы": "07",
+    "брюки": "09",
+    "шорты": "10",
+    "футболка": "11",
+    "футболки": "11",
 }
+
+CATS_LIST = "жилет, куртка, водолазка, джинсы, худи, свитер, лонгслив, брюки, шорты, футболка"
 
 # Состояния диалога
 user_states = {}
@@ -50,14 +51,6 @@ def init_db():
             CREATE TABLE IF NOT EXISTS model_counters (
                 category_code VARCHAR(10) PRIMARY KEY,
                 counter INTEGER DEFAULT 0
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS ctr_history (
-                nm_id BIGINT,
-                date DATE,
-                ctr FLOAT,
-                PRIMARY KEY (nm_id, date)
             )
         """)
         conn.commit()
@@ -87,6 +80,19 @@ def get_next_model_number(category_code):
         print(f"Ошибка счётчика: {e}")
         return "001"
 
+def get_current_counter(category_code):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT counter FROM model_counters WHERE category_code=%s", (category_code,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return row[0] if row else 0
+    except Exception as e:
+        print(f"Ошибка чтения счётчика: {e}")
+        return 0
+
 # ===================== БИТРИКС =====================
 
 def send_b24_message(dialog_id, text):
@@ -99,81 +105,90 @@ def send_b24_message(dialog_id, text):
 
 # ===================== АРТИКУЛЫ =====================
 
-def generate_article(category_code, model_number, color):
-    color_clean = color.lower().replace(" ", "").replace("-", "")
-    return f"J{category_code}{model_number}/{color_clean}"
-
 def handle_message(user_id, text):
     text = text.strip()
     state = user_states.get(user_id, {})
     step = state.get("step", "start")
 
-    if any(word in text.lower() for word in ["помощь", "help", "начать", "старт", "привет"]):
+    print(f"handle_message: user_id={user_id}, step={step}, text={text}")
+
+    # Помощь / старт
+    if any(word in text.lower() for word in ["помощь", "help", "начать", "старт", "привет", "/start"]):
         user_states[user_id] = {"step": "start"}
         send_b24_message(user_id,
-            "👋 Привет! Я бот JOTO.\n\n"
-            "Я умею:\n"
-            "• Создавать артикулы — напиши *артикул*\n"
-            "• Показывать категории — напиши *категории*"
+            "👋 Привет! Я бот JOTO для создания артикулов.\n\n"
+            "Напиши *артикул* чтобы создать новый артикул.\n\n"
+            f"Доступные категории:\n{CATS_LIST}"
         )
         return
 
-    if text.lower() == "категории":
-        cats = "\n".join([f"• {k} ({v})" for k, v in CATEGORIES.items()])
-        send_b24_message(user_id, f"📋 Доступные категории:\n{cats}")
-        return
-
+    # Начать создание артикула
     if text.lower() in ["артикул", "создать", "новый"]:
         user_states[user_id] = {"step": "wait_category"}
-        cats = ", ".join(CATEGORIES.keys())
-        send_b24_message(user_id, f"Введите категорию товара:\n{cats}")
+        send_b24_message(user_id,
+            f"📦 *Создание артикула*\n\n"
+            f"Шаг 1/3: Введите категорию товара:\n{CATS_LIST}"
+        )
         return
 
+    # Шаг 1: Категория
     if step == "wait_category":
         category = text.lower()
         if category not in CATEGORIES:
-            cats = ", ".join(CATEGORIES.keys())
-            send_b24_message(user_id, f"❌ Категория не найдена. Выберите из списка:\n{cats}")
+            send_b24_message(user_id, f"❌ Категория не найдена.\n\nВведите одну из:\n{CATS_LIST}")
             return
-        user_states[user_id] = {"step": "wait_color", "category": category}
-        send_b24_message(user_id, "Введите цвет (например: black, white, navy):")
-        return
-
-    if step == "wait_color":
-        user_states[user_id]["color"] = text
-        user_states[user_id]["step"] = "wait_name"
-        send_b24_message(user_id, "Введите название товара:")
-        return
-
-    if step == "wait_name":
-        category = state["category"]
-        color = state["color"]
-        name = text
-
         category_code = CATEGORIES[category]
-        model_number = get_next_model_number(category_code)
-        article = generate_article(category_code, model_number, color)
-
-        user_states[user_id] = {"step": "start"}
+        current = get_current_counter(category_code)
+        next_num = str(current + 1).zfill(3)
+        user_states[user_id] = {"step": "wait_color", "category": category, "category_code": category_code}
         send_b24_message(user_id,
-            f"✅ Артикул создан!\n\n"
-            f"📦 Артикул: *{article}*\n"
-            f"📁 Категория: {category}\n"
-            f"🎨 Цвет: {color}\n"
-            f"📝 Название: {name}\n"
-            f"🔢 Модель №{model_number}"
+            f"✅ Категория: {category.capitalize()} (J{category_code})\n"
+            f"Следующий номер модели будет: *{next_num}*\n\n"
+            f"Шаг 2/3: Введите цвет (например: black, white, grey, navy):"
         )
         return
 
-    # Если не попали ни в одно условие
-    send_b24_message(user_id, "Напишите *артикул* чтобы создать новый артикул, или *помощь* для справки.")
+    # Шаг 2: Цвет
+    if step == "wait_color":
+        color = text.lower().replace(" ", "")
+        user_states[user_id]["color"] = color
+        user_states[user_id]["step"] = "wait_name"
+        send_b24_message(user_id, f"✅ Цвет: {color}\n\nШаг 3/3: Введите название товара:")
+        return
+
+    # Шаг 3: Название
+    if step == "wait_name":
+        category = state["category"]
+        category_code = state["category_code"]
+        color = state["color"]
+        name = text
+
+        model_number = get_next_model_number(category_code)
+        article = f"J{category_code}{model_number}/{color}"
+
+        user_states[user_id] = {"step": "start"}
+        send_b24_message(user_id,
+            f"✅ *Артикул создан!*\n\n"
+            f"🏷 Артикул: *{article}*\n"
+            f"📁 Категория: {category.capitalize()}\n"
+            f"🎨 Цвет: {color}\n"
+            f"📝 Название: {name}\n"
+            f"🔢 Модель №{model_number}\n\n"
+            f"Для создания ещё одного напиши *артикул*"
+        )
+        return
+
+    # Не распознано
+    send_b24_message(user_id, "Напиши *артикул* чтобы создать новый артикул, или *помощь* для справки.")
 
 # ===================== CTR МОНИТОРИНГ =====================
+
+previous_ctr = {}
 
 def get_wb_ctr():
     try:
         today = datetime.now().date()
-        date_from = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+        date_from = (today - timedelta(days=2)).strftime("%Y-%m-%d")
         date_to = today.strftime("%Y-%m-%d")
 
         url = "https://seller-analytics-api.wildberries.ru/api/analytics/v3/sales-funnel/products"
@@ -184,10 +199,7 @@ def get_wb_ctr():
             "limit": 100,
             "offset": 0,
             "orderBy": {"field": "addToCartCount", "mode": "desc"},
-            "selectedPeriod": {
-                "begin": date_from,
-                "end": date_to
-            }
+            "selectedPeriod": {"begin": date_from, "end": date_to}
         }
 
         resp = httpx.post(url, headers=headers, json=payload, timeout=30)
@@ -202,12 +214,13 @@ def get_wb_ctr():
         result = {}
         for item in items:
             nm_id = item.get("nmID") or item.get("nmId")
+            name = item.get("vendorCode", str(nm_id))
             views = item.get("openCardCount", 0) or 0
             clicks = item.get("addToCartCount", 0) or 0
             if nm_id and views > 0:
-                result[nm_id] = round(clicks / views * 100, 2)
+                result[nm_id] = {"ctr": round(clicks / views * 100, 2), "name": name}
 
-        print(f"Получено артикулов: {len(result)}")
+        print(f"Получено артикулов с данными: {len(result)}")
         return result
 
     except Exception as e:
@@ -215,10 +228,8 @@ def get_wb_ctr():
         return {}
 
 def check_ctr():
+    global previous_ctr
     print(f"Проверка CTR: {datetime.now()}")
-    if not WB_API_TOKEN or not B24_WEBHOOK:
-        print("Нет токенов")
-        return
 
     current = get_wb_ctr()
     if not current:
@@ -226,42 +237,22 @@ def check_ctr():
         return
 
     alerts = []
-    today = datetime.now().date()
-    yesterday = today - timedelta(days=1)
+    for nm_id, data in current.items():
+        ctr = data["ctr"]
+        name = data["name"]
+        if nm_id in previous_ctr:
+            prev_ctr = previous_ctr[nm_id]["ctr"]
+            if prev_ctr > 0 and (prev_ctr - ctr) >= 1.0:
+                alerts.append(f"⚠️ {name}: CTR снизился с {prev_ctr}% до {ctr}% (−{round(prev_ctr-ctr,2)}%)")
 
-    try:
-        conn = get_db()
-        cur = conn.cursor()
+    previous_ctr = current
 
-        for nm_id, ctr in current.items():
-            # Получаем вчерашний CTR
-            cur.execute("SELECT ctr FROM ctr_history WHERE nm_id=%s AND date=%s", (nm_id, yesterday))
-            row = cur.fetchone()
-            if row:
-                prev_ctr = row[0]
-                if prev_ctr > 0 and ctr < prev_ctr and (prev_ctr - ctr) >= 1.0:
-                    alerts.append(f"⚠️ Артикул {nm_id}: CTR снизился с {prev_ctr}% до {ctr}% (−{round(prev_ctr-ctr,2)}%)")
-
-            # Сохраняем текущий CTR
-            cur.execute("""
-                INSERT INTO ctr_history (nm_id, date, ctr)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (nm_id, date) DO UPDATE SET ctr = EXCLUDED.ctr
-            """, (nm_id, today, ctr))
-
-        conn.commit()
-        cur.close()
-        conn.close()
-
-        if alerts:
-            msg = "📉 *Снижение CTR на Wildberries:*\n\n" + "\n".join(alerts)
-            send_b24_message("chat2024", msg)
-            print(f"Отправлено {len(alerts)} уведомлений")
-        else:
-            print("Снижений CTR не обнаружено")
-
-    except Exception as e:
-        print(f"Ошибка проверки CTR: {e}")
+    if alerts:
+        msg = "📉 *Снижение CTR на Wildberries:*\n\n" + "\n".join(alerts)
+        send_b24_message("chat2024", msg)
+        print(f"Отправлено {len(alerts)} уведомлений")
+    else:
+        print("Снижений CTR >= 1% не найдено")
 
 # ===================== FLASK =====================
 
@@ -272,20 +263,15 @@ def index():
 @app.route("/check-now", methods=["GET"])
 def check_now():
     threading.Thread(target=check_ctr).start()
-    return jsonify({"ok": True, "message": "CTR проверка запущена"})
+    return jsonify({"ok": True})
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        print("=== INCOMING REQUEST ===")
-        print("Content-Type:", request.content_type)
-
         if request.content_type and "application/json" in request.content_type:
             data = request.json or {}
         else:
             data = request.form.to_dict()
-
-        print("Form data:", data)
 
         from_user_id = data.get("data[PARAMS][FROM_USER_ID]", "").strip()
         dialog_id = data.get("data[PARAMS][DIALOG_ID]", "").strip()
@@ -301,7 +287,7 @@ def webhook():
 
     except Exception as e:
         print(f"Ошибка webhook: {e}")
-        return jsonify({"ok": False, "error": str(e)})
+        return jsonify({"ok": False})
 
 # ===================== ЗАПУСК =====================
 
