@@ -25,6 +25,10 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
 REPORT_USER_ID = os.environ.get("REPORT_USER_ID", "226").strip()
 CTR_ALERT_DIALOG = os.environ.get("CTR_ALERT_DIALOG", "chat2024").strip()
 
+# Ссылка на логотип в шапке (необязательно). Задаётся в Railway → Variables.
+# Если пусто — показывается текстовый вордмарк «JOTO».
+LOGO_URL = os.environ.get("LOGO_URL", "").strip()
+
 # Имя бота, которое увидят пользователи в Битриксе
 BOT_NAME = "Article Generator"
 BOT_CODE = "joto_article_bot"
@@ -765,7 +769,6 @@ def bitrix_events():
 
 # ===================== FLASK: ИНТЕРФЕЙС ПРИЛОЖЕНИЯ =====================
 
-# Запасной вариант страницы, если app_page.html не найден.
 APP_PAGE_HTML = """<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Генерация артикулов</title></head>
 <body style="font-family:sans-serif;padding:24px"><h1>Генерация артикулов</h1>
@@ -784,6 +787,10 @@ def load_app_page():
 @app.route("/", methods=["GET", "POST"])
 def index():
     return Response(load_app_page(), mimetype="text/html")
+
+@app.route("/api/config", methods=["GET"])
+def api_config():
+    return jsonify({"ok": True, "logo_url": LOGO_URL})
 
 @app.route("/api/categories", methods=["GET"])
 def api_categories():
