@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import threading
 import schedule
@@ -114,6 +115,103 @@ def get_current_counter(category_code):
     except Exception as e:
         return 0
 
+def set_counter(category_code, value):
+    """Жёстко выставить счётчик категории (используется при синхронизации с WB)."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO model_counters (category_code, counter)
+            VALUES (%s, %s)
+            ON CONFLICT (category_code) DO UPDATE SET counter = EXCLUDED.counter
+        """, (category_code, value))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print(f"Ошибка set_counter: {e}")
+
+# ===================== СИНХРОНИЗАЦИЯ С WB (уникальность артикулов) =====================
+# Артикул имеет вид J<код 2 цифры><номер 3 цифры>/<цвет>. Чтобы не выдать номер,
+# который уже есть на маркетплейсе, тянем список всех карточек из WB Content API,
+# парсим использованные номера по каждой категории и берём первый свободный.
+
+ARTICLE_RE = re.compile(r"^J(\d{2})(\d{3})", re.IGNORECASE)
+
+# Кэш использованных номеров: {category_code: set(int)}. Обновляется не чаще раза в 5 мин.
+_wb_used_cache = {"ts": 0.0, "used": {}}
+_WB_CACHE_TTL = 300
+
+def fetch_wb_vendor_codes():
+    """Список всех vendorCode (артикулов) из WB Content API с пагинацией по курсору."""
+    codes = []
+    if not WB_API_TOKEN:
+        return codes
+    url = "https://content-api.wildberries.ru/content/v2/get/cards/list"
+    headers = {"Authorization": WB_API_TOKEN}
+    cursor = {"limit": 100}
+    for _ in range(200):  # предохранитель от бесконечного цикла
+        payload = {"settings": {"cursor": cursor, "filter": {"withPhoto": -1}}}
+        resp = httpx.post(url, headers=headers, json=payload, timeout=30)
+        if resp.status_code != 200:
+            print(f"WB Content API {resp.status_code}: {resp.text[:200]}")
+            break
+        data = resp.json()
+        cards = data.get("cards", []) or []
+        for c in cards:
+            vc = c.get("vendorCode")
+            if vc:
+                codes.append(vc)
+        cur = data.get("cursor", {}) or {}
+        total = cur.get("total", 0)
+        if total < cursor["limit"]:
+            break
+        cursor = {"limit": 100, "updatedAt": cur.get("updatedAt"), "nmID": cur.get("nmID")}
+    return codes
+
+def _used_numbers_by_code(codes):
+    used = {}
+    for vc in codes:
+        m = ARTICLE_RE.match((vc or "").strip())
+        if m:
+            cc = m.group(1)
+            nn = int(m.group(2))
+            used.setdefault(cc, set()).add(nn)
+    return used
+
+def get_used_numbers(category_code):
+    """Множество уже занятых номеров для категории (по данным WB), с кэшем."""
+    now = time.time()
+    if now - _wb_used_cache["ts"] > _WB_CACHE_TTL or not _wb_used_cache["used"]:
+        try:
+            codes = fetch_wb_vendor_codes()
+            if codes:
+                _wb_used_cache["used"] = _used_numbers_by_code(codes)
+                _wb_used_cache["ts"] = now
+                print(f"WB: загружено артикулов {len(codes)}")
+        except Exception as e:
+            print(f"Ошибка синхронизации с WB: {e}")
+    return _wb_used_cache["used"].get(category_code, set())
+
+def peek_next_number(category_code):
+    """Следующий свободный номер БЕЗ резервирования (для предпросмотра)."""
+    used = get_used_numbers(category_code)
+    base = max([get_current_counter(category_code)] + (list(used) or [0]))
+    n = base + 1
+    while n in used:
+        n += 1
+    return str(n).zfill(3)
+
+def reserve_next_number(category_code):
+    """Следующий свободный номер с учётом WB + резервирование в БД."""
+    used = get_used_numbers(category_code)
+    base = max([get_current_counter(category_code)] + (list(used) or [0]))
+    n = base + 1
+    while n in used:
+        n += 1
+    set_counter(category_code, n)
+    return str(n).zfill(3)
+
 # ===================== OAuth-хранилище (Postgres) =====================
 
 def save_oauth(access_token, refresh_token, expires_in, domain,
@@ -192,7 +290,6 @@ def get_access_token():
         return None
     if time.time() < exp:
         return access, domain
-    # истёк — рефрешим
     if not refresh or not BITRIX_CLIENT_ID or not BITRIX_CLIENT_SECRET:
         print("[OAUTH] access_token истёк, refresh невозможен (нет refresh/CLIENT_ID/SECRET)")
         return None
@@ -318,8 +415,7 @@ def handle_message(dialog_id, text, auth=None):
             send_b24_message(dialog_id, f"❌ Категория не найдена.\n\nВведите одну из:\n{CATS_LIST}", auth=auth)
             return
         category_code = CATEGORIES[category]
-        current = get_current_counter(category_code)
-        next_num = str(current + 1).zfill(3)
+        next_num = peek_next_number(category_code)
         user_states[dialog_id] = {"step": "wait_color", "category": category, "category_code": category_code}
         send_b24_message(dialog_id,
             f"✅ Категория: {category.capitalize()} (J{category_code})\n"
@@ -341,7 +437,7 @@ def handle_message(dialog_id, text, auth=None):
         category_code = state["category_code"]
         color = state["color"]
         name = text
-        model_number = get_next_model_number(category_code)
+        model_number = reserve_next_number(category_code)
         article = f"J{category_code}{model_number}/{color}"
         user_states[dialog_id] = {"step": "start"}
         send_b24_message(dialog_id,
@@ -553,11 +649,9 @@ def bitrix_events():
     event = vals.get("event", "")
     app_token = vals.get("auth[application_token]", "")
 
-    # Проверка подписи (если задан BITRIX_APP_TOKEN)
     if BITRIX_APP_TOKEN and app_token and app_token != BITRIX_APP_TOKEN:
         return Response("forbidden", status=403)
 
-    # Свежий токен и домен прямо из события — используем сразу и обновляем кэш
     auth = {
         "access_token": vals.get("auth[access_token]", ""),
         "domain": vals.get("auth[domain]", ""),
@@ -718,17 +812,17 @@ def index():
 
 @app.route("/api/next", methods=["GET"])
 def api_next():
-    """Показать следующий номер модели для категории БЕЗ увеличения счётчика."""
+    """Показать следующий свободный номер модели для категории (с учётом WB)."""
     category = (request.args.get("category", "") or "").strip().lower()
     if category not in CATEGORIES:
         return jsonify({"ok": False, "error": "Неизвестная категория"}), 400
     code = CATEGORIES[category]
-    next_num = str(get_current_counter(code) + 1).zfill(3)
+    next_num = peek_next_number(code)
     return jsonify({"ok": True, "category_code": code, "next_number": next_num})
 
 @app.route("/api/article", methods=["POST"])
 def api_article():
-    """Создать артикул: увеличить счётчик и вернуть готовый артикул."""
+    """Создать артикул: взять первый свободный номер (с учётом WB) и вернуть артикул."""
     data = request.get_json(silent=True) or request.form
     category = (data.get("category", "") or "").strip().lower()
     color = (data.get("color", "") or "").strip().lower().replace(" ", "")
@@ -738,7 +832,7 @@ def api_article():
     if not color:
         return jsonify({"ok": False, "error": "Укажите цвет"}), 400
     code = CATEGORIES[category]
-    model_number = get_next_model_number(code)
+    model_number = reserve_next_number(code)
     article = f"J{code}{model_number}/{color}"
     return jsonify({
         "ok": True,
@@ -761,6 +855,19 @@ def admin_register():
     try:
         bot_id = register_bot()
         return jsonify({"ok": True, "bot_id": bot_id})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/wb-refresh", methods=["GET"])
+def api_wb_refresh():
+    """Принудительно обновить кэш артикулов из WB и показать сколько занято по категориям."""
+    _wb_used_cache["ts"] = 0.0
+    try:
+        codes = fetch_wb_vendor_codes()
+        _wb_used_cache["used"] = _used_numbers_by_code(codes)
+        _wb_used_cache["ts"] = time.time()
+        summary = {cc: len(s) for cc, s in _wb_used_cache["used"].items()}
+        return jsonify({"ok": True, "total_codes": len(codes), "by_category": summary})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
