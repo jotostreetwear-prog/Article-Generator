@@ -591,9 +591,37 @@ def bitrix_events():
 
 # ===================== FLASK: СЕРВИСНЫЕ ЭНДПОИНТЫ =====================
 
-@app.route("/", methods=["GET"])
+APP_PAGE_HTML = """<!DOCTYPE html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Генерация артикулов</title>
+<script src="//api.bitrix24.com/api/v1/"></script>
+<style>
+  body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;padding:32px;color:#1a1a2e;background:#f5f7fb}
+  .card{max-width:560px;margin:0 auto;background:#fff;border-radius:14px;padding:28px 32px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
+  h1{font-size:22px;margin:0 0 4px}
+  .ok{color:#13a463;font-weight:600}
+  ol{line-height:1.7;padding-left:20px}
+  code{background:#eef1f6;padding:2px 6px;border-radius:5px}
+</style></head>
+<body>
+<div class="card">
+  <h1>🏷 Генерация артикулов</h1>
+  <p class="ok">Бот «Article Generator» работает ✓</p>
+  <p>Это чат-бот. Работайте с ним в мессенджере Битрикс24:</p>
+  <ol>
+    <li>Откройте <b>Чат</b> и найдите бота <b>«Article Generator»</b>.</li>
+    <li>Напишите <code>привет</code> — бот ответит и покажет категории.</li>
+    <li>Напишите <code>артикул</code> и пройдите 3 шага: категория → цвет → название.</li>
+  </ol>
+  <p>Бот также сам присылает мониторинг CTR (09:00 МСК) и отчёт по задачам (18:00 МСК).</p>
+</div>
+<script>try{ BX24.init(function(){ BX24.fitWindow && BX24.fitWindow(); }); }catch(e){}</script>
+</body></html>"""
+
+@app.route("/", methods=["GET", "POST"])
 def index():
-    return f"«{BOT_NAME}» — бот работает ✓"
+    return Response(APP_PAGE_HTML, mimetype="text/html")
 
 @app.route("/admin/bitrix/register", methods=["GET"])
 def admin_register():
