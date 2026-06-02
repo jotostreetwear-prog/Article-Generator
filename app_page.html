@@ -41,6 +41,8 @@ body{ background:var(--bg); color:var(--ink); font-family:var(--sans);
 .wordmark-text{ font-family:var(--sans); font-style:italic; font-weight:900; font-size:42px;
   letter-spacing:-.04em; line-height:1; color:var(--ink); text-transform:lowercase; }
 .wordmark-img{ height:46px; width:auto; max-width:80%; display:block; object-fit:contain; }
+.wordmark-img[hidden]{ display:none; }
+.wordmark-text[hidden]{ display:none; }
 [data-theme="dark"] .wordmark-img{ filter:invert(1); }
 .screen-title{ margin:0 0 8px; font-family:var(--serif); font-style:italic; font-weight:400;
   font-size:34px; line-height:1.06; letter-spacing:-.01em; }

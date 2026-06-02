@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import mimetypes
 import threading
 import schedule
 import httpx
@@ -25,8 +26,7 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
 REPORT_USER_ID = os.environ.get("REPORT_USER_ID", "226").strip()
 CTR_ALERT_DIALOG = os.environ.get("CTR_ALERT_DIALOG", "chat2024").strip()
 
-# Ссылка на логотип в шапке (необязательно). Задаётся в Railway → Variables.
-# Если пусто — показывается текстовый вордмарк «JOTO».
+# Ссылка на логотип (необязательно). Приоритет выше файла logo.* в репозитории.
 LOGO_URL = os.environ.get("LOGO_URL", "").strip()
 
 # Имя бота, которое увидят пользователи в Битриксе
@@ -784,13 +784,34 @@ def load_app_page():
         print(f"Не удалось загрузить app_page.html: {e}")
         return APP_PAGE_HTML
 
+LOGO_EXTS = ("png", "svg", "jpg", "jpeg", "webp")
+
+def _logo_file():
+    """Путь к файлу logo.* рядом с main.py, если загружен."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    for ext in LOGO_EXTS:
+        p = os.path.join(base, "logo." + ext)
+        if os.path.exists(p):
+            return p
+    return None
+
+@app.route("/logo", methods=["GET"])
+def logo():
+    p = _logo_file()
+    if not p:
+        return Response("not found", status=404)
+    mt = mimetypes.guess_type(p)[0] or "application/octet-stream"
+    with open(p, "rb") as f:
+        return Response(f.read(), mimetype=mt)
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     return Response(load_app_page(), mimetype="text/html")
 
 @app.route("/api/config", methods=["GET"])
 def api_config():
-    return jsonify({"ok": True, "logo_url": LOGO_URL})
+    logo_url = LOGO_URL or ("/logo" if _logo_file() else "")
+    return jsonify({"ok": True, "logo_url": logo_url})
 
 @app.route("/api/categories", methods=["GET"])
 def api_categories():
