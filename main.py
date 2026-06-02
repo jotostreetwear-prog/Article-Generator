@@ -31,7 +31,7 @@ BOT_CODE = "joto_article_bot"
 
 EVENT_HANDLER_URL = f"{PUBLIC_BASE_URL}/bitrix/events" if PUBLIC_BASE_URL else ""
 
-# Категории по инструкции JOTO
+# Встроенные категории по инструкции JOTO (включая словоформы для чата)
 CATEGORIES = {
     "жилет": "01", "жилеты": "01",
     "куртка": "02", "куртки": "02",
@@ -76,12 +76,113 @@ def init_db():
                 app_token    TEXT
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS categories (
+                name TEXT PRIMARY KEY,
+                code VARCHAR(2) NOT NULL UNIQUE
+            )
+        """)
         conn.commit()
         cur.close()
         conn.close()
         print("БД инициализирована")
     except Exception as e:
         print(f"Ошибка БД: {e}")
+
+# ===================== КАТЕГОРИИ (встроенные + добавленные) =====================
+
+# Понятные названия встроенных категорий (значение -> подпись)
+CATEGORY_TITLES = {
+    "жилет": "Жилет", "куртка": "Куртка", "водолазка": "Водолазка",
+    "джинсы": "Джинсы", "худи": "Худи", "свитер": "Свитер",
+    "лонгслив": "Лонгслив", "брюки": "Брюки", "шорты": "Шорты", "футболка": "Футболка",
+}
+
+def db_list_categories():
+    """Категории, добавленные сотрудниками: [(name, code), ...]."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT name, code FROM categories ORDER BY code")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [(r[0], r[1]) for r in rows]
+    except Exception as e:
+        print(f"Ошибка db_list_categories: {e}")
+        return []
+
+def resolve_category_code(name):
+    """Код категории по названию: сначала встроенные, потом добавленные. None если нет."""
+    name = (name or "").strip().lower()
+    if name in CATEGORIES:
+        return CATEGORIES[name]
+    for n, code in db_list_categories():
+        if n.lower() == name:
+            return code
+    return None
+
+def all_categories():
+    """Полный список для интерфейса: [{value, title, code}], встроенные + добавленные."""
+    seen_codes = set()
+    items = []
+    for value, title in CATEGORY_TITLES.items():
+        code = CATEGORIES.get(value)
+        if code and code not in seen_codes:
+            items.append({"value": value, "title": title, "code": code})
+            seen_codes.add(code)
+    for name, code in db_list_categories():
+        if code not in seen_codes:
+            items.append({"value": name, "title": name.capitalize(), "code": code})
+            seen_codes.add(code)
+    items.sort(key=lambda x: x["code"])
+    return items
+
+def used_category_codes():
+    codes = set(CATEGORIES.values())
+    for _, code in db_list_categories():
+        codes.add(code)
+    return codes
+
+def next_free_category_code():
+    """Наименьший свободный 2-значный код категории (01..99)."""
+    used = used_category_codes()
+    for i in range(1, 100):
+        c = str(i).zfill(2)
+        if c not in used:
+            return c
+    return None
+
+def add_category(name, code=None):
+    """Добавить категорию. Возвращает (ok, code|error)."""
+    name = (name or "").strip().lower()
+    if not name:
+        return False, "Укажите название категории"
+    if resolve_category_code(name):
+        return False, "Такая категория уже есть"
+    if code:
+        code = str(code).strip()
+        if not re.fullmatch(r"\d{2}", code):
+            return False, "Код должен быть из 2 цифр"
+        if code in used_category_codes():
+            return False, "Этот код уже занят"
+    else:
+        code = next_free_category_code()
+        if not code:
+            return False, "Свободных кодов не осталось"
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("INSERT INTO categories (name, code) VALUES (%s, %s)", (name, code))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True, code
+    except Exception as e:
+        print(f"Ошибка add_category: {e}")
+        return False, "Ошибка сохранения"
+
+# ===================== СЧЁТЧИКИ НОМЕРОВ =====================
 
 def get_next_model_number(category_code):
     try:
@@ -132,13 +233,11 @@ def set_counter(category_code, value):
         print(f"Ошибка set_counter: {e}")
 
 # ===================== СИНХРОНИЗАЦИЯ С WB (уникальность артикулов) =====================
-# Артикул имеет вид J<код 2 цифры><номер 3 цифры>/<цвет>. Чтобы не выдать номер,
-# который уже есть на маркетплейсе, тянем список всех карточек из WB Content API,
-# парсим использованные номера по каждой категории и берём первый свободный.
+# Артикул: J<код 2 цифры><номер 3 цифры>/<цвет>. Чтобы не выдать номер, который уже есть
+# на маркетплейсе, тянем все карточки из WB Content API и берём первый свободный номер.
 
 ARTICLE_RE = re.compile(r"^J(\d{2})(\d{3})", re.IGNORECASE)
 
-# Кэш использованных номеров: {category_code: set(int)}. Обновляется не чаще раза в 5 мин.
 _wb_used_cache = {"ts": 0.0, "used": {}}
 _WB_CACHE_TTL = 300
 
@@ -150,7 +249,7 @@ def fetch_wb_vendor_codes():
     url = "https://content-api.wildberries.ru/content/v2/get/cards/list"
     headers = {"Authorization": WB_API_TOKEN}
     cursor = {"limit": 100}
-    for _ in range(200):  # предохранитель от бесконечного цикла
+    for _ in range(200):
         payload = {"settings": {"cursor": cursor, "filter": {"withPhoto": -1}}}
         resp = httpx.post(url, headers=headers, json=payload, timeout=30)
         if resp.status_code != 200:
@@ -411,10 +510,10 @@ def handle_message(dialog_id, text, auth=None):
 
     if step == "wait_category":
         category = text.lower()
-        if category not in CATEGORIES:
-            send_b24_message(dialog_id, f"❌ Категория не найдена.\n\nВведите одну из:\n{CATS_LIST}", auth=auth)
+        category_code = resolve_category_code(category)
+        if not category_code:
+            send_b24_message(dialog_id, f"❌ Категория не найдена.\n\nВведите одну из:\n{CATS_LIST}\n\n(новые категории можно добавить в приложении)", auth=auth)
             return
-        category_code = CATEGORIES[category]
         next_num = peek_next_number(category_code)
         user_states[dialog_id] = {"step": "wait_color", "category": category, "category_code": category_code}
         send_b24_message(dialog_id,
@@ -717,19 +816,18 @@ APP_PAGE_HTML = """<!DOCTYPE html>
 
   <label>Категория товара</label>
   <select id="category">
-    <option value="">— выберите категорию —</option>
-    <option value="жилет">Жилет (01)</option>
-    <option value="куртка">Куртка (02)</option>
-    <option value="водолазка">Водолазка (03)</option>
-    <option value="джинсы">Джинсы (04)</option>
-    <option value="худи">Худи (05)</option>
-    <option value="свитер">Свитер (06)</option>
-    <option value="лонгслив">Лонгслив (07)</option>
-    <option value="брюки">Брюки (09)</option>
-    <option value="шорты">Шорты (10)</option>
-    <option value="футболка">Футболка (11)</option>
+    <option value="">— загрузка… —</option>
   </select>
   <div class="hint" id="nextHint"></div>
+
+  <div id="newCatBox" style="display:none;margin-top:12px;padding:14px 16px;border:1px dashed #c7cede;border-radius:11px;background:#fafbff">
+    <label style="margin-top:0">Название новой категории</label>
+    <input id="newCatName" placeholder="например: бомбер" autocomplete="off">
+    <label>Код (2 цифры, необязательно)</label>
+    <input id="newCatCode" placeholder="авто — назначим свободный код" autocomplete="off" maxlength="2">
+    <button id="addCat" style="background:#0c7a44">Добавить категорию</button>
+    <div class="err" id="catErr"></div>
+  </div>
 
   <label>Цвет (латиницей)</label>
   <input id="color" placeholder="например: black, white, grey, navy" autocomplete="off">
@@ -755,10 +853,29 @@ var cat=document.getElementById('category'), colorEl=document.getElementById('co
     nameEl=document.getElementById('name'), go=document.getElementById('go'),
     err=document.getElementById('err'), res=document.getElementById('result'),
     artEl=document.getElementById('article'), metaEl=document.getElementById('meta'),
-    hint=document.getElementById('nextHint'), copyBtn=document.getElementById('copy');
+    hint=document.getElementById('nextHint'), copyBtn=document.getElementById('copy'),
+    newCatBox=document.getElementById('newCatBox'), newCatName=document.getElementById('newCatName'),
+    newCatCode=document.getElementById('newCatCode'), addCat=document.getElementById('addCat'),
+    catErr=document.getElementById('catErr');
+
+function loadCategories(selectValue){
+  fetch('/api/categories').then(function(r){return r.json()}).then(function(d){
+    if(!d.ok) return;
+    var html='<option value="">— выберите категорию —</option>';
+    d.categories.forEach(function(c){
+      html+='<option value="'+c.value+'">'+c.title+' ('+c.code+')</option>';
+    });
+    html+='<option value="__new__">➕ Новая категория…</option>';
+    cat.innerHTML=html;
+    if(selectValue){ cat.value=selectValue; cat.dispatchEvent(new Event('change')); }
+  }).catch(function(){});
+}
+loadCategories();
 
 cat.addEventListener('change', function(){
   hint.textContent='';
+  if(cat.value==='__new__'){ newCatBox.style.display='block'; return; }
+  newCatBox.style.display='none';
   if(!cat.value) return;
   fetch('/api/next?category='+encodeURIComponent(cat.value))
     .then(function(r){return r.json()})
@@ -766,11 +883,30 @@ cat.addEventListener('change', function(){
     .catch(function(){});
 });
 
+addCat.addEventListener('click', function(){
+  catErr.classList.remove('show');
+  var nm=newCatName.value.trim();
+  if(!nm){ catErr.textContent='Укажите название'; catErr.classList.add('show'); return; }
+  addCat.disabled=true; addCat.textContent='Добавляю...';
+  fetch('/api/category', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name:nm, code:newCatCode.value.trim()})
+  }).then(function(r){return r.json()}).then(function(d){
+    addCat.disabled=false; addCat.textContent='Добавить категорию';
+    if(!d.ok){ catErr.textContent=d.error||'Ошибка'; catErr.classList.add('show'); return; }
+    newCatName.value=''; newCatCode.value='';
+    loadCategories(d.value);
+  }).catch(function(){
+    addCat.disabled=false; addCat.textContent='Добавить категорию';
+    catErr.textContent='Не удалось связаться с сервером'; catErr.classList.add('show');
+  });
+});
+
 function showErr(m){ err.textContent=m; err.classList.add('show'); res.classList.remove('show'); }
 
 go.addEventListener('click', function(){
   err.classList.remove('show'); res.classList.remove('show');
-  if(!cat.value){ showErr('Выберите категорию'); return; }
+  if(!cat.value || cat.value==='__new__'){ showErr('Выберите или добавьте категорию'); return; }
   if(!colorEl.value.trim()){ showErr('Укажите цвет'); return; }
   go.disabled=true; go.textContent='Создаю...';
   fetch('/api/article', {
@@ -799,24 +935,33 @@ copyBtn.addEventListener('click', function(){
 </script>
 </body></html>"""
 
-# Человекочитаемые названия категорий для интерфейса
-CATEGORY_TITLES = {
-    "жилет": "Жилет", "куртка": "Куртка", "водолазка": "Водолазка",
-    "джинсы": "Джинсы", "худи": "Худи", "свитер": "Свитер",
-    "лонгслив": "Лонгслив", "брюки": "Брюки", "шорты": "Шорты", "футболка": "Футболка",
-}
-
 @app.route("/", methods=["GET", "POST"])
 def index():
     return Response(APP_PAGE_HTML, mimetype="text/html")
 
+@app.route("/api/categories", methods=["GET"])
+def api_categories():
+    """Список категорий для выпадающего меню (встроенные + добавленные)."""
+    return jsonify({"ok": True, "categories": all_categories()})
+
+@app.route("/api/category", methods=["POST"])
+def api_add_category():
+    """Добавить новую категорию. Тело: {name, code?}."""
+    data = request.get_json(silent=True) or request.form
+    name = (data.get("name", "") or "").strip().lower()
+    code = (data.get("code", "") or "").strip()
+    ok, result = add_category(name, code or None)
+    if not ok:
+        return jsonify({"ok": False, "error": result}), 400
+    return jsonify({"ok": True, "value": name, "title": name.capitalize(), "code": result})
+
 @app.route("/api/next", methods=["GET"])
 def api_next():
-    """Показать следующий свободный номер модели для категории (с учётом WB)."""
+    """Следующий свободный номер модели для категории (с учётом WB)."""
     category = (request.args.get("category", "") or "").strip().lower()
-    if category not in CATEGORIES:
+    code = resolve_category_code(category)
+    if not code:
         return jsonify({"ok": False, "error": "Неизвестная категория"}), 400
-    code = CATEGORIES[category]
     next_num = peek_next_number(code)
     return jsonify({"ok": True, "category_code": code, "next_number": next_num})
 
@@ -827,11 +972,11 @@ def api_article():
     category = (data.get("category", "") or "").strip().lower()
     color = (data.get("color", "") or "").strip().lower().replace(" ", "")
     name = (data.get("name", "") or "").strip()
-    if category not in CATEGORIES:
+    code = resolve_category_code(category)
+    if not code:
         return jsonify({"ok": False, "error": "Неизвестная категория"}), 400
     if not color:
         return jsonify({"ok": False, "error": "Укажите цвет"}), 400
-    code = CATEGORIES[category]
     model_number = reserve_next_number(code)
     article = f"J{code}{model_number}/{color}"
     return jsonify({
