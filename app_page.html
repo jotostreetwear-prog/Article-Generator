@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light" data-style="A">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>JOTO — Генерация артикулов</title>
+<style>
+:root{
+  --accent:#CCFF00;
+  --accent-ink:#0A0A0A;
+  --accent-deep:#9bc400;
+  --serif: Georgia, "Times New Roman", "PT Serif", serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --r:14px;
+  --ease:cubic-bezier(.2,.7,.2,1);
+}
+[data-theme="light"]{
+  --bg:#F1F1EE; --surface:#FFFFFF; --surface-2:#F7F7F4;
+  --ink:#0B0B0C; --ink-2:#56564F; --ink-3:#8E8E86;
+  --line:#E4E4DE; --line-strong:#0B0B0C; --field:#FFFFFF;
+  --shadow:0 1px 2px rgba(11,11,12,.04), 0 18px 44px -28px rgba(11,11,12,.35);
+  --glow:none;
+}
+[data-theme="dark"]{
+  --bg:#0A0A0B; --surface:#141416; --surface-2:#1B1B1E;
+  --ink:#F3F3EE; --ink-2:#A9A9A2; --ink-3:#73736C;
+  --line:#27272B; --line-strong:#3A3A40; --field:#0F0F11;
+  --shadow:0 1px 0 rgba(255,255,255,.02), 0 24px 60px -30px rgba(0,0,0,.9);
+  --glow:0 0 28px -6px rgba(204,255,0,.5);
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{ background:var(--bg); color:var(--ink); font-family:var(--sans);
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; min-height:100vh; }
+.stage{ width:100%; max-width:520px; margin:0 auto; padding:34px 22px 56px; }
+@media (max-width:440px){ .stage{ padding:22px 16px 40px; } }
+.card{ position:relative; }
+.head{ margin-bottom:30px; }
+.brand{ display:flex; align-items:flex-end; gap:14px; margin-bottom:22px; }
+.wordmark-text{ font-family:var(--serif); font-style:italic; font-weight:700; font-size:30px;
+  letter-spacing:.02em; line-height:1; color:var(--ink); }
+.screen-title{ margin:0 0 8px; font-family:var(--serif); font-style:italic; font-weight:400;
+  font-size:34px; line-height:1.06; letter-spacing:-.01em; }
+.screen-sub{ margin:0; font-size:14.5px; line-height:1.5; color:var(--ink-2); max-width:42ch; }
+.form{ display:flex; flex-direction:column; gap:20px; margin-top:30px; }
+.field{ display:flex; flex-direction:column; gap:9px; }
+.field[hidden]{ display:none; }
+.label{ display:flex; align-items:center; gap:8px; font-size:11px; letter-spacing:.16em;
+  text-transform:uppercase; font-weight:700; color:var(--ink-2); }
+.label-note{ letter-spacing:.02em; text-transform:none; font-weight:500; font-size:11.5px; color:var(--ink-3); }
+.select-wrap{ position:relative; }
+.chev{ position:absolute; right:16px; top:50%; transform:translateY(-50%); width:14px; height:14px;
+  pointer-events:none; color:var(--ink-2); }
+select, input[type="text"]{ width:100%; font-family:var(--sans); font-size:16px; color:var(--ink);
+  background:var(--field); border:1.5px solid var(--line); border-radius:var(--r); padding:14px 16px;
+  outline:none; transition:border-color .16s var(--ease), box-shadow .16s var(--ease), background .16s var(--ease);
+  -webkit-appearance:none; appearance:none; }
+select{ padding-right:40px; cursor:pointer; }
+input::placeholder{ color:var(--ink-3); }
+select:focus, input[type="text"]:focus{ border-color:var(--line-strong);
+  box-shadow:0 0 0 4px color-mix(in srgb, var(--accent) 26%, transparent); }
+input.invalid{ border-color:#e0483a; box-shadow:0 0 0 4px rgba(224,72,58,.16); }
+.hint{ margin:0; font-size:13px; color:var(--ink-2); min-height:1.2em; display:flex; align-items:center;
+  gap:8px; transition:color .16s var(--ease); }
+.hint .num{ font-family:var(--mono); font-weight:600; color:var(--ink); background:var(--surface-2);
+  border:1px solid var(--line); padding:1px 8px; border-radius:6px; font-size:12.5px; }
+.hint .num.pulse{ animation:pop .32s var(--ease); }
+@keyframes pop{ 0%{transform:scale(.86);opacity:.3} 100%{transform:scale(1);opacity:1} }
+.form-error{ margin:0; font-size:13.5px; color:#e0483a; font-weight:500; display:flex;
+  align-items:flex-start; gap:8px; line-height:1.45; }
+.form-error[hidden]{ display:none; }
+.form-error::before{ content:"!"; flex:none; width:18px; height:18px; border-radius:50%;
+  background:#e0483a; color:#fff; font-weight:800; font-size:12px; display:grid; place-items:center; margin-top:1px; }
+.btn{ position:relative; margin-top:4px; width:100%; font-family:var(--sans); font-size:15px;
+  font-weight:700; letter-spacing:.01em; color:#fff; background:var(--ink); border:1.5px solid var(--ink);
+  border-radius:var(--r); padding:16px 18px; cursor:pointer; display:flex; align-items:center;
+  justify-content:center; gap:10px;
+  transition:transform .14s var(--ease), background .16s var(--ease), color .16s, box-shadow .16s, border-color .16s; }
+[data-theme="dark"] .btn{ color:#0A0A0A; }
+.btn:hover{ transform:translateY(-1px); }
+.btn:active{ transform:translateY(0); }
+.btn[disabled]{ cursor:default; opacity:.9; transform:none; }
+.btn .spinner{ display:none; width:16px; height:16px; border-radius:50%; border:2px solid currentColor;
+  border-top-color:transparent; animation:spin .7s linear infinite; }
+.btn.loading .spinner{ display:inline-block; }
+@keyframes spin{ to{ transform:rotate(360deg); } }
+.btn.secondary{ background:transparent; color:var(--ink); border-color:var(--line-strong); }
+[data-theme="dark"] .btn.secondary{ color:var(--ink); }
+.result{ margin-top:26px; }
+.result[hidden]{ display:none; }
+.result-card{ position:relative; background:var(--surface); border:1.5px solid var(--line);
+  border-radius:calc(var(--r) + 4px); padding:24px 22px 22px; box-shadow:var(--shadow);
+  animation:rise .42s var(--ease) both; }
+@keyframes rise{ from{ opacity:0; transform:translateY(14px); } to{ opacity:1; transform:translateY(0); } }
+.result-eyebrow{ display:inline-flex; align-items:center; gap:8px; font-size:10.5px; letter-spacing:.2em;
+  text-transform:uppercase; font-weight:700; color:var(--ink-2); }
+.result-eyebrow::before{ content:""; width:7px; height:7px; border-radius:50%; background:var(--accent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 28%, transparent); }
+.code-row{ display:flex; align-items:center; gap:14px; margin:14px 0 4px; }
+.code{ font-family:var(--mono); font-weight:600; font-size:34px; letter-spacing:-.01em; line-height:1.04;
+  color:var(--ink); word-break:break-all; }
+.code .slash{ color:var(--ink-3); }
+.code .color{ color:var(--accent-deep); }
+[data-theme="dark"] .code .color{ color:var(--accent); }
+.divider{ height:1px; background:var(--line); margin:18px 0; }
+.meta{ margin:0; display:grid; grid-template-columns:repeat(auto-fit, minmax(110px,1fr)); gap:16px 18px; }
+.meta > div{ display:flex; flex-direction:column; gap:4px; min-width:0; }
+.meta dt{ font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); font-weight:700; }
+.meta dd{ margin:0; font-size:14.5px; color:var(--ink); font-weight:500; overflow-wrap:anywhere; }
+.copy{ margin-top:20px; width:100%; font-family:var(--sans); font-size:14px; font-weight:700;
+  letter-spacing:.04em; text-transform:uppercase; background:var(--accent); color:var(--accent-ink);
+  border:1.5px solid var(--accent); border-radius:var(--r); padding:14px 16px; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; gap:9px;
+  transition:transform .14s var(--ease), filter .16s, box-shadow .16s; box-shadow:var(--glow); }
+.copy:hover{ transform:translateY(-1px); filter:brightness(1.04); }
+.copy:active{ transform:translateY(0); }
+.copy.done{ background:transparent; color:var(--ink); border-color:var(--line-strong); box-shadow:none; }
+.copy svg{ width:15px; height:15px; }
+[data-style="A"]{ --r:12px; }
+[data-style="A"] select,
+[data-style="A"] input[type="text"]{ background:transparent; border:none; border-bottom:1.5px solid var(--line);
+  border-radius:0; padding:12px 2px; font-size:17px; }
+[data-style="A"] select{ padding-right:30px; }
+[data-style="A"] .chev{ right:4px; }
+[data-style="A"] select:focus,
+[data-style="A"] input[type="text"]:focus{ border-bottom-color:var(--line-strong); box-shadow:0 1px 0 0 var(--accent); }
+[data-style="A"] input.invalid{ border-bottom-color:#e0483a; box-shadow:0 1px 0 0 #e0483a; }
+[data-style="A"] .btn{ background:var(--ink); }
+[data-style="A"] .result-card{ border:none; border-top:2px solid var(--line-strong); border-radius:0;
+  background:transparent; box-shadow:none; padding:22px 0 0; }
+[data-style="A"] .code{ font-size:38px; }
+#theme-toggle{ position:fixed; bottom:14px; right:14px; z-index:50; width:40px; height:40px;
+  border-radius:50%; cursor:pointer; display:grid; place-items:center; font-size:15px; line-height:1;
+  background:color-mix(in srgb, var(--surface) 90%, transparent); color:var(--ink-2);
+  border:1.5px solid var(--line); box-shadow:0 8px 24px -14px rgba(0,0,0,.45);
+  backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+  transition:transform .14s var(--ease), color .14s, border-color .14s; }
+#theme-toggle:hover{ transform:translateY(-1px); color:var(--ink); border-color:var(--line-strong); }
+#theme-toggle:active{ transform:translateY(0); }
+#demo-badge{ position:fixed; left:12px; bottom:12px; z-index:50; font-family:var(--mono); font-size:10.5px;
+  letter-spacing:.06em; color:var(--ink-2); background:color-mix(in srgb,var(--surface) 86%, transparent);
+  border:1px solid var(--line); border-radius:8px; padding:5px 9px; display:none; align-items:center;
+  gap:6px; backdrop-filter:blur(8px); }
+#demo-badge.show{ display:inline-flex; }
+#demo-badge::before{ content:""; width:6px; height:6px; border-radius:50%; background:var(--accent); }
+</style>
+</head>
+<body>
+
+<button id="theme-toggle" type="button" aria-label="Сменить тему" title="Сменить тему">☾</button>
+
+<div class="stage">
+  <main class="card">
+    <header class="head">
+      <div class="brand">
+        <span class="wordmark-text">JOTO</span>
+      </div>
+      <h1 class="screen-title">Генерация артикулов</h1>
+      <p class="screen-sub">Выберите категорию и укажите цвет — система выдаст следующий свободный артикул.</p>
+    </header>
+
+    <form class="form" id="form" novalidate>
+      <div class="field">
+        <label class="label" for="category">Категория</label>
+        <div class="select-wrap">
+          <select id="category">
+            <option value="" disabled selected>Загрузка категорий…</option>
+          </select>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+        <p class="hint" id="hint">Выберите категорию, чтобы увидеть номер модели</p>
+      </div>
+
+      <div class="field" id="newCatField" hidden>
+        <label class="label" for="newCatName">Новая категория</label>
+        <input id="newCatName" type="text" placeholder="например: бомбер" autocomplete="off" spellcheck="false">
+        <label class="label" for="newCatCode" style="margin-top:6px">Код <span class="label-note">2 цифры, можно оставить пустым</span></label>
+        <input id="newCatCode" type="text" placeholder="авто — назначим свободный" maxlength="2" autocomplete="off">
+        <p class="form-error" id="newCatError" hidden></p>
+        <button class="btn secondary" id="addCatBtn" type="button"><span class="spinner" aria-hidden="true"></span><span class="btn-label">Добавить категорию</span></button>
+      </div>
+
+      <div class="field">
+        <label class="label" for="color">Цвет</label>
+        <input id="color" type="text" placeholder="чёрный" autocomplete="off" spellcheck="false">
+      </div>
+
+      <p class="form-error" id="formError" hidden></p>
+
+      <button class="btn" id="submit" type="submit">
+        <span class="spinner" aria-hidden="true"></span>
+        <span class="btn-label">Создать артикул</span>
+      </button>
+    </form>
+
+    <section class="result" id="result" hidden aria-live="polite">
+      <div class="result-card">
+        <span class="result-eyebrow">Артикул создан</span>
+        <div class="code-row">
+          <div class="code" id="code"></div>
+        </div>
+        <div class="divider"></div>
+        <dl class="meta">
+          <div><dt>Категория</dt><dd id="m-cat">—</dd></div>
+          <div><dt>Цвет</dt><dd id="m-color">—</dd></div>
+          <div><dt>Модель</dt><dd id="m-model">—</dd></div>
+        </dl>
+        <button class="copy" id="copy" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span class="copy-label">Скопировать артикул</span>
+        </button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="demo-badge">демо-режим · бэкенд не подключён</div>
+
+<script>
+function fit(){ try{ if (typeof BX24 !== "undefined" && BX24.fitWindow) BX24.fitWindow(); }catch(e){} }
+(function loadBitrix(){
+  var q = location.search || "";
+  var inBitrix = /[?&](DOMAIN|APP_SID|PROTOCOL|AUTH_ID)=/i.test(q) || /bitrix24|bitrix/i.test(document.referrer || "");
+  if (!inBitrix) return;
+  var s = document.createElement("script");
+  s.src = "//api.bitrix24.com/api/v1/";
+  s.onload = function(){ try{ if (typeof BX24 !== "undefined" && BX24.init) BX24.init(function(){ fit(); }); }catch(e){} };
+  document.head.appendChild(s);
+})();
+
+var FALLBACK_CATS = [
+  {value:"жилет",title:"Жилет",code:"01"},{value:"куртка",title:"Куртка",code:"02"},
+  {value:"водолазка",title:"Водолазка",code:"03"},{value:"джинсы",title:"Джинсы",code:"04"},
+  {value:"худи",title:"Худи",code:"05"},{value:"свитер",title:"Свитер",code:"06"},
+  {value:"лонгслив",title:"Лонгслив",code:"07"},{value:"брюки",title:"Брюки",code:"09"},
+  {value:"шорты",title:"Шорты",code:"10"},{value:"футболка",title:"Футболка",code:"11"}
+];
+var CATS = {};
+
+var $ = function(id){ return document.getElementById(id); };
+var form=$("form"), category=$("category"), colorEl=$("color");
+var hint=$("hint"), formError=$("formError"), submit=$("submit");
+var result=$("result"), codeEl=$("code"), copyBtn=$("copy");
+var newCatField=$("newCatField"), newCatName=$("newCatName"), newCatCode=$("newCatCode"),
+    addCatBtn=$("addCatBtn"), newCatError=$("newCatError");
+
+var DEMO = null;
+var mockState = {};
+function pad3(n){ return String(n).padStart(3,"0"); }
+
+function fillSelect(list, selectValue){
+  CATS = {};
+  var html = '<option value="" disabled' + (selectValue?'':' selected') + '>Выберите категорию</option>';
+  list.forEach(function(c){
+    CATS[c.value] = {title:c.title, code:c.code};
+    html += '<option value="'+c.value+'">'+c.title+' — '+c.code+'</option>';
+  });
+  html += '<option value="__new__">➕ Новая категория…</option>';
+  category.innerHTML = html;
+  if (selectValue){ category.value = selectValue; }
+}
+
+async function loadCategories(selectValue){
+  var list = FALLBACK_CATS;
+  try{
+    var r = await fetch("/api/categories", {cache:"no-store"});
+    var j = await r.json();
+    if (j && j.ok && j.categories && j.categories.length){ list = j.categories; }
+  }catch(e){}
+  fillSelect(list, selectValue);
+  if (selectValue){ category.dispatchEvent(new Event("change")); }
+  fit();
+}
+
+async function detectMode(){
+  try{
+    var r = await fetch("/api/next?category=" + encodeURIComponent("худи"), {cache:"no-store"});
+    var j = await r.json();
+    DEMO = !(j && j.ok);
+  }catch(e){ DEMO = true; }
+  document.getElementById("demo-badge").classList.toggle("show", DEMO === true);
+}
+
+async function apiNext(cat){
+  if (DEMO){ return { ok:true, next_number: pad3(mockState[cat] || 1) }; }
+  var r = await fetch("/api/next?category=" + encodeURIComponent(cat), {cache:"no-store"});
+  return await r.json();
+}
+
+async function apiCreate(payload){
+  if (DEMO){
+    var c = CATS[payload.category];
+    if (!c) return { ok:false, error:"Неизвестная категория" };
+    var num = pad3(mockState[payload.category] || 1);
+    var color = payload.color.toLowerCase().trim();
+    mockState[payload.category] = (mockState[payload.category] || 1) + 1;
+    return { ok:true, article:"J"+c.code+num+"/"+color, category_title:c.title, color:color, model_number:num };
+  }
+  try{
+    var r = await fetch("/api/article", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+    return await r.json();
+  }catch(e){ return { ok:false, error:"Не удалось связаться с сервером" }; }
+}
+
+async function refreshHint(){
+  var v = category.value;
+  if (!v || v === "__new__"){ hint.innerHTML = "Выберите категорию, чтобы увидеть номер модели"; return; }
+  hint.innerHTML = "Следующий номер модели: <span class='num'>…</span>";
+  try{
+    var res = await apiNext(v);
+    if (res && res.ok){ hint.innerHTML = "Следующий номер модели: <span class='num pulse'>" + res.next_number + "</span>"; }
+    else { hint.innerHTML = "Категория «" + (CATS[v]?CATS[v].title:v) + "» · код " + (CATS[v]?CATS[v].code:"—"); }
+  }catch(e){ hint.innerHTML = "Категория «" + (CATS[v]?CATS[v].title:v) + "» · код " + (CATS[v]?CATS[v].code:"—"); }
+  fit();
+}
+
+category.addEventListener("change", function(){
+  clearError();
+  if (category.value === "__new__"){ newCatField.hidden = false; hint.innerHTML = ""; fit(); return; }
+  newCatField.hidden = true;
+  refreshHint();
+});
+
+function clearError(){
+  formError.hidden = true; formError.textContent = "";
+  category.classList.remove("invalid"); colorEl.classList.remove("invalid");
+}
+function showError(msg, el){ formError.textContent = msg; formError.hidden = false; if (el) el.classList.add("invalid"); fit(); }
+
+function validate(){
+  clearError();
+  if (!category.value || category.value === "__new__"){ showError("Выберите категорию товара.", category); return null; }
+  var color = colorEl.value.trim();
+  if (!color){ showError("Укажите цвет товара.", colorEl); return null; }
+  if (!/^[\p{L}0-9][\p{L}0-9 _-]*$/u.test(color)){
+    showError("Цвет: только буквы, цифры и дефис — например чёрный, off-white, navy.", colorEl); return null;
+  }
+  return { category:category.value, color:color };
+}
+
+function renderResult(data){
+  var html = data.article;
+  var m = /^(J\d{2}\d{3})\/(.+)$/.exec(data.article || "");
+  if (m){ html = m[1] + "<span class='slash'>/</span><span class='color'>" + m[2] + "</span>"; }
+  codeEl.innerHTML = html;
+  $("m-cat").textContent   = data.category_title || (CATS[category.value]?CATS[category.value].title:"—");
+  $("m-color").textContent = data.color || "—";
+  $("m-model").textContent = data.model_number || "—";
+  result.hidden = false;
+  resetCopy();
+  fit();
+}
+
+function setLoading(on){
+  submit.classList.toggle("loading", on);
+  submit.disabled = on;
+  submit.querySelector(".btn-label").textContent = on ? "Создаю…" : "Создать артикул";
+}
+
+form.addEventListener("submit", async function(e){
+  e.preventDefault();
+  var payload = validate();
+  if (!payload) return;
+  setLoading(true);
+  try{
+    var data = await apiCreate(payload);
+    if (data && data.ok){ renderResult(data); refreshHint(); }
+    else { showError((data && data.error) ? data.error : "Не удалось создать артикул."); }
+  }catch(err){ showError("Не удалось связаться с сервером"); }
+  finally{ setLoading(false); }
+});
+
+addCatBtn.addEventListener("click", async function(){
+  newCatError.hidden = true;
+  var nm = (newCatName.value || "").trim();
+  if (!nm){ newCatError.textContent = "Укажите название категории"; newCatError.hidden = false; fit(); return; }
+  addCatBtn.classList.add("loading"); addCatBtn.disabled = true;
+  addCatBtn.querySelector(".btn-label").textContent = "Добавляю…";
+  try{
+    var r = await fetch("/api/category", { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ name:nm, code:(newCatCode.value || "").trim() }) });
+    var j = await r.json();
+    if (!j || !j.ok){ newCatError.textContent = (j && j.error) ? j.error : "Ошибка"; newCatError.hidden = false; }
+    else { newCatName.value = ""; newCatCode.value = ""; await loadCategories(j.value); }
+  }catch(e){ newCatError.textContent = "Не удалось связаться с сервером"; newCatError.hidden = false; }
+  addCatBtn.classList.remove("loading"); addCatBtn.disabled = false;
+  addCatBtn.querySelector(".btn-label").textContent = "Добавить категорию";
+  fit();
+});
+
+var copyTimer=null;
+function resetCopy(){ copyBtn.classList.remove("done"); copyBtn.querySelector(".copy-label").textContent = "Скопировать артикул"; }
+copyBtn.addEventListener("click", async function(){
+  var text = codeEl.textContent;
+  var ok = false;
+  try{
+    if (navigator.clipboard && navigator.clipboard.writeText){ await navigator.clipboard.writeText(text); ok = true; }
+    else { throw new Error("no clipboard"); }
+  }catch(e){
+    try{
+      var ta = document.createElement("textarea");
+      ta.value = text; ta.style.position="fixed"; ta.style.opacity="0";
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      ok = document.execCommand("copy"); document.body.removeChild(ta);
+    }catch(e2){ ok = false; }
+  }
+  copyBtn.classList.add("done");
+  copyBtn.querySelector(".copy-label").textContent = ok ? "Скопировано ✓" : "Скопируйте вручную";
+  clearTimeout(copyTimer);
+  copyTimer = setTimeout(resetCopy, 1800);
+});
+
+(function(){
+  var root = document.documentElement;
+  var btn = document.getElementById("theme-toggle");
+  function sync(){ btn.textContent = root.getAttribute("data-theme") === "dark" ? "☀" : "☾"; }
+  btn.addEventListener("click", function(){
+    root.setAttribute("data-theme", root.getAttribute("data-theme") === "dark" ? "light" : "dark");
+    sync(); fit();
+  });
+  sync();
+})();
+
+detectMode().then(loadCategories).then(function(){ fit(); });
+window.addEventListener("load", fit);
+</script>
+</body>
+</html>

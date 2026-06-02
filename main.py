@@ -91,7 +91,6 @@ def init_db():
 
 # ===================== КАТЕГОРИИ (встроенные + добавленные) =====================
 
-# Понятные названия встроенных категорий (значение -> подпись)
 CATEGORY_TITLES = {
     "жилет": "Жилет", "куртка": "Куртка", "водолазка": "Водолазка",
     "джинсы": "Джинсы", "худи": "Худи", "свитер": "Свитер",
@@ -99,7 +98,6 @@ CATEGORY_TITLES = {
 }
 
 def db_list_categories():
-    """Категории, добавленные сотрудниками: [(name, code), ...]."""
     try:
         conn = get_db()
         cur = conn.cursor()
@@ -113,7 +111,6 @@ def db_list_categories():
         return []
 
 def resolve_category_code(name):
-    """Код категории по названию: сначала встроенные, потом добавленные. None если нет."""
     name = (name or "").strip().lower()
     if name in CATEGORIES:
         return CATEGORIES[name]
@@ -123,7 +120,6 @@ def resolve_category_code(name):
     return None
 
 def all_categories():
-    """Полный список для интерфейса: [{value, title, code}], встроенные + добавленные."""
     seen_codes = set()
     items = []
     for value, title in CATEGORY_TITLES.items():
@@ -145,7 +141,6 @@ def used_category_codes():
     return codes
 
 def next_free_category_code():
-    """Наименьший свободный 2-значный код категории (01..99)."""
     used = used_category_codes()
     for i in range(1, 100):
         c = str(i).zfill(2)
@@ -154,7 +149,6 @@ def next_free_category_code():
     return None
 
 def add_category(name, code=None):
-    """Добавить категорию. Возвращает (ok, code|error)."""
     name = (name or "").strip().lower()
     if not name:
         return False, "Укажите название категории"
@@ -217,7 +211,6 @@ def get_current_counter(category_code):
         return 0
 
 def set_counter(category_code, value):
-    """Жёстко выставить счётчик категории (используется при синхронизации с WB)."""
     try:
         conn = get_db()
         cur = conn.cursor()
@@ -233,8 +226,6 @@ def set_counter(category_code, value):
         print(f"Ошибка set_counter: {e}")
 
 # ===================== СИНХРОНИЗАЦИЯ С WB (уникальность артикулов) =====================
-# Артикул: J<код 2 цифры><номер 3 цифры>/<цвет>. Чтобы не выдать номер, который уже есть
-# на маркетплейсе, тянем все карточки из WB Content API и берём первый свободный номер.
 
 ARTICLE_RE = re.compile(r"^J(\d{2})(\d{3})", re.IGNORECASE)
 
@@ -242,7 +233,6 @@ _wb_used_cache = {"ts": 0.0, "used": {}}
 _WB_CACHE_TTL = 300
 
 def fetch_wb_vendor_codes():
-    """Список всех vendorCode (артикулов) из WB Content API с пагинацией по курсору."""
     codes = []
     if not WB_API_TOKEN:
         return codes
@@ -279,7 +269,6 @@ def _used_numbers_by_code(codes):
     return used
 
 def get_used_numbers(category_code):
-    """Множество уже занятых номеров для категории (по данным WB), с кэшем."""
     now = time.time()
     if now - _wb_used_cache["ts"] > _WB_CACHE_TTL or not _wb_used_cache["used"]:
         try:
@@ -293,7 +282,6 @@ def get_used_numbers(category_code):
     return _wb_used_cache["used"].get(category_code, set())
 
 def peek_next_number(category_code):
-    """Следующий свободный номер БЕЗ резервирования (для предпросмотра)."""
     used = get_used_numbers(category_code)
     base = max([get_current_counter(category_code)] + (list(used) or [0]))
     n = base + 1
@@ -302,7 +290,6 @@ def peek_next_number(category_code):
     return str(n).zfill(3)
 
 def reserve_next_number(category_code):
-    """Следующий свободный номер с учётом WB + резервирование в БД."""
     used = get_used_numbers(category_code)
     base = max([get_current_counter(category_code)] + (list(used) or [0]))
     n = base + 1
@@ -315,7 +302,6 @@ def reserve_next_number(category_code):
 
 def save_oauth(access_token, refresh_token, expires_in, domain,
                member_id=None, bot_id=None, app_token=None):
-    """Сохранить/обновить OAuth-токены приложения. Храним одну строку id=1."""
     try:
         expires_at = int(time.time()) + int(expires_in or 3600) - 60
         conn = get_db()
@@ -377,7 +363,6 @@ def set_bot_id(bot_id):
         print(f"Ошибка set_bot_id: {e}")
 
 def get_access_token():
-    """Вернуть (access_token, domain). Если истёк — обновить через refresh_token."""
     st = load_oauth()
     if not st:
         return None
@@ -421,7 +406,6 @@ def get_access_token():
 # ===================== BITRIX REST =====================
 
 def bx_call(method, params=None, auth=None):
-    """Вызов Bitrix REST. auth (из события) имеет приоритет, иначе берём токен из БД."""
     body = dict(params or {})
     if auth and auth.get("access_token") and auth.get("domain"):
         token, domain = auth["access_token"], auth["domain"]
@@ -456,7 +440,6 @@ def send_b24_message(dialog_id, text, auth=None):
         print(f"Ошибка отправки: {e}")
 
 def register_bot():
-    """Зарегистрировать бота в Битриксе (imbot.register). Возвращает BOT_ID."""
     if not EVENT_HANDLER_URL:
         raise RuntimeError("PUBLIC_BASE_URL не задан — некуда слать события")
     result = bx_call("imbot.register", {
@@ -720,7 +703,6 @@ INSTALL_FINISH_HTML = """<!DOCTYPE html>
 
 @app.route("/install", methods=["GET", "POST"])
 def install():
-    """Обработчик установки локального приложения Битрикс24 (ONAPPINSTALL)."""
     vals = request.values
     auth_id = vals.get("AUTH_ID", "")
     refresh_id = vals.get("REFRESH_ID", "")
@@ -743,7 +725,6 @@ def install():
 
 @app.route("/bitrix/events", methods=["POST"])
 def bitrix_events():
-    """Приём событий бота: ONIMBOTMESSAGEADD, приветствие, удаление."""
     vals = request.values
     event = vals.get("event", "")
     app_token = vals.get("auth[application_token]", "")
@@ -784,169 +765,32 @@ def bitrix_events():
 
 # ===================== FLASK: ИНТЕРФЕЙС ПРИЛОЖЕНИЯ =====================
 
-APP_PAGE_HTML = """<!DOCTYPE html>
-<html lang="ru"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Генерация артикулов</title>
-<script src="//api.bitrix24.com/api/v1/"></script>
-<style>
-  *{box-sizing:border-box}
-  body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;margin:0;padding:28px;color:#1a1a2e;background:#f5f7fb}
-  .card{max-width:520px;margin:0 auto;background:#fff;border-radius:14px;padding:26px 30px;box-shadow:0 2px 12px rgba(0,0,0,.06)}
-  h1{font-size:21px;margin:0 0 18px}
-  label{display:block;font-size:13px;color:#5a5a72;margin:14px 0 6px}
-  select,input{width:100%;padding:11px 12px;font-size:15px;border:1px solid #d7dbe6;border-radius:9px;background:#fff}
-  select:focus,input:focus{outline:none;border-color:#3b82f6}
-  .hint{font-size:12px;color:#8a8aa0;margin-top:6px}
-  button{margin-top:20px;width:100%;padding:13px;font-size:15px;font-weight:600;color:#fff;background:#2563eb;border:none;border-radius:9px;cursor:pointer}
-  button:hover{background:#1d4ed8}
-  button:disabled{background:#9db8ee;cursor:default}
-  .result{margin-top:20px;padding:18px;border-radius:11px;background:#ecfdf3;border:1px solid #b6ebc9;display:none}
-  .result.show{display:block}
-  .article{font-size:24px;font-weight:700;color:#0c7a44;letter-spacing:.5px}
-  .meta{font-size:13px;color:#3f6f52;margin-top:6px;line-height:1.6}
-  .copy{margin-top:12px;width:auto;padding:8px 16px;font-size:13px;background:#0c7a44}
-  .copy:hover{background:#0a6236}
-  .err{margin-top:16px;color:#c0392b;font-size:14px;display:none}
-  .err.show{display:block}
-</style></head>
-<body>
-<div class="card">
-  <h1>🏷 Генерация артикулов</h1>
+# Запасной вариант страницы, если app_page.html не найден.
+APP_PAGE_HTML = """<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Генерация артикулов</title></head>
+<body style="font-family:sans-serif;padding:24px"><h1>Генерация артикулов</h1>
+<p>Файл интерфейса app_page.html не найден. Проверьте, что он рядом с main.py.</p></body></html>"""
 
-  <label>Категория товара</label>
-  <select id="category">
-    <option value="">— загрузка… —</option>
-  </select>
-  <div class="hint" id="nextHint"></div>
+APP_PAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_page.html")
 
-  <div id="newCatBox" style="display:none;margin-top:12px;padding:14px 16px;border:1px dashed #c7cede;border-radius:11px;background:#fafbff">
-    <label style="margin-top:0">Название новой категории</label>
-    <input id="newCatName" placeholder="например: бомбер" autocomplete="off">
-    <label>Код (2 цифры, необязательно)</label>
-    <input id="newCatCode" placeholder="авто — назначим свободный код" autocomplete="off" maxlength="2">
-    <button id="addCat" style="background:#0c7a44">Добавить категорию</button>
-    <div class="err" id="catErr"></div>
-  </div>
-
-  <label>Цвет (латиницей)</label>
-  <input id="color" placeholder="например: black, white, grey, navy" autocomplete="off">
-
-  <label>Название товара</label>
-  <input id="name" placeholder="например: Oversize Hoodie" autocomplete="off">
-
-  <button id="go">Создать артикул</button>
-
-  <div class="err" id="err"></div>
-
-  <div class="result" id="result">
-    <div class="article" id="article"></div>
-    <div class="meta" id="meta"></div>
-    <button class="copy" id="copy">Скопировать артикул</button>
-  </div>
-</div>
-
-<script>
-try{ BX24.init(function(){ BX24.fitWindow && BX24.fitWindow(); }); }catch(e){}
-
-var cat=document.getElementById('category'), colorEl=document.getElementById('color'),
-    nameEl=document.getElementById('name'), go=document.getElementById('go'),
-    err=document.getElementById('err'), res=document.getElementById('result'),
-    artEl=document.getElementById('article'), metaEl=document.getElementById('meta'),
-    hint=document.getElementById('nextHint'), copyBtn=document.getElementById('copy'),
-    newCatBox=document.getElementById('newCatBox'), newCatName=document.getElementById('newCatName'),
-    newCatCode=document.getElementById('newCatCode'), addCat=document.getElementById('addCat'),
-    catErr=document.getElementById('catErr');
-
-function loadCategories(selectValue){
-  fetch('/api/categories').then(function(r){return r.json()}).then(function(d){
-    if(!d.ok) return;
-    var html='<option value="">— выберите категорию —</option>';
-    d.categories.forEach(function(c){
-      html+='<option value="'+c.value+'">'+c.title+' ('+c.code+')</option>';
-    });
-    html+='<option value="__new__">➕ Новая категория…</option>';
-    cat.innerHTML=html;
-    if(selectValue){ cat.value=selectValue; cat.dispatchEvent(new Event('change')); }
-  }).catch(function(){});
-}
-loadCategories();
-
-cat.addEventListener('change', function(){
-  hint.textContent='';
-  if(cat.value==='__new__'){ newCatBox.style.display='block'; return; }
-  newCatBox.style.display='none';
-  if(!cat.value) return;
-  fetch('/api/next?category='+encodeURIComponent(cat.value))
-    .then(function(r){return r.json()})
-    .then(function(d){ if(d.ok) hint.textContent='Следующий номер модели: '+d.next_number; })
-    .catch(function(){});
-});
-
-addCat.addEventListener('click', function(){
-  catErr.classList.remove('show');
-  var nm=newCatName.value.trim();
-  if(!nm){ catErr.textContent='Укажите название'; catErr.classList.add('show'); return; }
-  addCat.disabled=true; addCat.textContent='Добавляю...';
-  fetch('/api/category', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({name:nm, code:newCatCode.value.trim()})
-  }).then(function(r){return r.json()}).then(function(d){
-    addCat.disabled=false; addCat.textContent='Добавить категорию';
-    if(!d.ok){ catErr.textContent=d.error||'Ошибка'; catErr.classList.add('show'); return; }
-    newCatName.value=''; newCatCode.value='';
-    loadCategories(d.value);
-  }).catch(function(){
-    addCat.disabled=false; addCat.textContent='Добавить категорию';
-    catErr.textContent='Не удалось связаться с сервером'; catErr.classList.add('show');
-  });
-});
-
-function showErr(m){ err.textContent=m; err.classList.add('show'); res.classList.remove('show'); }
-
-go.addEventListener('click', function(){
-  err.classList.remove('show'); res.classList.remove('show');
-  if(!cat.value || cat.value==='__new__'){ showErr('Выберите или добавьте категорию'); return; }
-  if(!colorEl.value.trim()){ showErr('Укажите цвет'); return; }
-  go.disabled=true; go.textContent='Создаю...';
-  fetch('/api/article', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({category:cat.value, color:colorEl.value, name:nameEl.value})
-  }).then(function(r){return r.json()}).then(function(d){
-    go.disabled=false; go.textContent='Создать артикул';
-    if(!d.ok){ showErr(d.error||'Ошибка'); return; }
-    artEl.textContent=d.article;
-    metaEl.innerHTML='Категория: '+d.category_title+' &nbsp;•&nbsp; Цвет: '+d.color+
-      ' &nbsp;•&nbsp; Модель №'+d.model_number+(d.name?(' &nbsp;•&nbsp; '+d.name):'');
-    res.classList.add('show');
-    hint.textContent='';
-  }).catch(function(){
-    go.disabled=false; go.textContent='Создать артикул';
-    showErr('Не удалось связаться с сервером');
-  });
-});
-
-copyBtn.addEventListener('click', function(){
-  var t=artEl.textContent;
-  if(navigator.clipboard){ navigator.clipboard.writeText(t); }
-  copyBtn.textContent='Скопировано ✓';
-  setTimeout(function(){ copyBtn.textContent='Скопировать артикул'; }, 1500);
-});
-</script>
-</body></html>"""
+def load_app_page():
+    try:
+        with open(APP_PAGE_PATH, encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        print(f"Не удалось загрузить app_page.html: {e}")
+        return APP_PAGE_HTML
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    return Response(APP_PAGE_HTML, mimetype="text/html")
+    return Response(load_app_page(), mimetype="text/html")
 
 @app.route("/api/categories", methods=["GET"])
 def api_categories():
-    """Список категорий для выпадающего меню (встроенные + добавленные)."""
     return jsonify({"ok": True, "categories": all_categories()})
 
 @app.route("/api/category", methods=["POST"])
 def api_add_category():
-    """Добавить новую категорию. Тело: {name, code?}."""
     data = request.get_json(silent=True) or request.form
     name = (data.get("name", "") or "").strip().lower()
     code = (data.get("code", "") or "").strip()
@@ -957,7 +801,6 @@ def api_add_category():
 
 @app.route("/api/next", methods=["GET"])
 def api_next():
-    """Следующий свободный номер модели для категории (с учётом WB)."""
     category = (request.args.get("category", "") or "").strip().lower()
     code = resolve_category_code(category)
     if not code:
@@ -967,7 +810,6 @@ def api_next():
 
 @app.route("/api/article", methods=["POST"])
 def api_article():
-    """Создать артикул: взять первый свободный номер (с учётом WB) и вернуть артикул."""
     data = request.get_json(silent=True) or request.form
     category = (data.get("category", "") or "").strip().lower()
     color = (data.get("color", "") or "").strip().lower().replace(" ", "")
@@ -994,7 +836,6 @@ def api_article():
 
 @app.route("/admin/bitrix/register", methods=["GET"])
 def admin_register():
-    """Ручная (пере)регистрация бота. Защита: ?secret=BITRIX_CLIENT_SECRET."""
     if not BITRIX_CLIENT_SECRET or request.args.get("secret", "") != BITRIX_CLIENT_SECRET:
         return Response("forbidden", status=403)
     try:
@@ -1005,7 +846,6 @@ def admin_register():
 
 @app.route("/api/wb-refresh", methods=["GET"])
 def api_wb_refresh():
-    """Принудительно обновить кэш артикулов из WB и показать сколько занято по категориям."""
     _wb_used_cache["ts"] = 0.0
     try:
         codes = fetch_wb_vendor_codes()
