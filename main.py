@@ -1231,8 +1231,20 @@ def run_scheduler():
         schedule.run_pending()
         time.sleep(60)
 
+def ensure_left_menu_on_start():
+    """После деплоя сам привязывает пункт «Карточки WB» в левое меню,
+    если приложение уже установлено (есть сохранённый OAuth-токен)."""
+    if not load_oauth():
+        print("[МЕНЮ] OAuth ещё не настроен — пункт левого меню привяжется при установке")
+        return
+    try:
+        register_left_menu()
+    except Exception as e:
+        print(f"[МЕНЮ] Не удалось привязать пункт левого меню при старте: {e}")
+
 if __name__ == "__main__":
     init_db()
     threading.Thread(target=run_scheduler, daemon=True).start()
+    threading.Thread(target=ensure_left_menu_on_start, daemon=True).start()
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
