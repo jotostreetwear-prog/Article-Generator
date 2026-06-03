@@ -34,6 +34,9 @@ BOT_NAME = "Article Generator"
 BOT_CODE = "joto_article_bot"
 
 EVENT_HANDLER_URL = f"{PUBLIC_BASE_URL}/bitrix/events" if PUBLIC_BASE_URL else ""
+# Пункт левого меню Bitrix24 → открывает раздел массовых карточек WB
+LEFT_MENU_HANDLER_URL = f"{PUBLIC_BASE_URL}/cards" if PUBLIC_BASE_URL else ""
+LEFT_MENU_TITLE = "Карточки WB"
 
 # Встроенные категории по инструкции JOTO (включая словоформы для чата)
 CATEGORIES = {
@@ -464,6 +467,24 @@ def register_bot():
     print(f"Бот зарегистрирован: BOT_ID={bot_id}")
     return bot_id
 
+def register_left_menu():
+    """Добавляет приложение отдельным пунктом в левое меню Bitrix24."""
+    if not LEFT_MENU_HANDLER_URL:
+        raise RuntimeError("PUBLIC_BASE_URL не задан — некуда вести пункт меню")
+    # снимаем старую привязку (если была) — чтобы не плодить дубли
+    try:
+        bx_call("placement.unbind", {"PLACEMENT": "LEFT_MENU", "HANDLER": LEFT_MENU_HANDLER_URL})
+    except Exception:
+        pass
+    result = bx_call("placement.bind", {
+        "PLACEMENT": "LEFT_MENU",
+        "HANDLER": LEFT_MENU_HANDLER_URL,
+        "TITLE": LEFT_MENU_TITLE,
+        "DESCRIPTION": "Массовое создание и редактирование карточек Wildberries",
+    })
+    print(f"Пункт левого меню зарегистрирован: {LEFT_MENU_HANDLER_URL}")
+    return result
+
 # ===================== ДИАЛОГ: СОЗДАНИЕ АРТИКУЛА =====================
 
 def send_welcome(dialog_id, auth=None):
@@ -722,6 +743,10 @@ def install():
             register_bot()
         except Exception as e:
             print(f"Ошибка регистрации бота при установке: {e}")
+        try:
+            register_left_menu()
+        except Exception as e:
+            print(f"Ошибка регистрации пункта левого меню при установке: {e}")
     else:
         print("[INSTALL] не пришли AUTH_ID/DOMAIN — проверь настройки приложения")
 
@@ -1027,7 +1052,7 @@ def apply_bulk_field(raw, field, value, charc_id=None, charc_name=None):
         raw["sizes"] = sizes
     return raw
 
-@app.route("/cards", methods=["GET"])
+@app.route("/cards", methods=["GET", "POST"])
 def cards_page():
     return Response(load_named_page(WB_CARDS_PAGE_PATH), mimetype="text/html")
 
@@ -1134,6 +1159,16 @@ def admin_register():
     try:
         bot_id = register_bot()
         return jsonify({"ok": True, "bot_id": bot_id})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/admin/bitrix/placement", methods=["GET"])
+def admin_placement():
+    if not BITRIX_CLIENT_SECRET or request.args.get("secret", "") != BITRIX_CLIENT_SECRET:
+        return Response("forbidden", status=403)
+    try:
+        register_left_menu()
+        return jsonify({"ok": True, "handler": LEFT_MENU_HANDLER_URL, "title": LEFT_MENU_TITLE})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
