@@ -9,6 +9,8 @@ import psycopg2
 from flask import Flask, request, jsonify, Response
 from datetime import datetime, timedelta
 
+import nk_integration as nk  # интеграция с Национальным каталогом (Честный ЗНАК)
+
 app = Flask(__name__)
 
 # ===================== КОНФИГ (переменные окружения) =====================
@@ -1150,6 +1152,29 @@ def api_wb_charcs():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
+# ===================== НАЦИОНАЛЬНЫЙ КАТАЛОГ (ЧЕСТНЫЙ ЗНАК): ГТИНЫ =====================
+# Каркас Варианта Б: создать товары в НК → получить ГТИНы → подставить в карточки WB.
+
+@app.route("/api/nk/status", methods=["GET"])
+def api_nk_status():
+    return jsonify({"ok": True, **nk.nk_status()})
+
+@app.route("/api/nk/create-gtins", methods=["POST"])
+def api_nk_create_gtins():
+    data = request.get_json(silent=True) or {}
+    items = data.get("items") or []
+    if not items:
+        return jsonify({"ok": False, "error": "Нет товаров для создания ГТИНов"}), 400
+    try:
+        gtin_map = nk.create_gtins_for_items(items)
+        return jsonify({"ok": True, "gtins": gtin_map, "count": len(gtin_map)})
+    except nk.NKNotConfigured as e:
+        return jsonify({"ok": False, "error": str(e), "needs_config": True}), 400
+    except nk.NKError as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
 # ===================== FLASK: СЕРВИСНЫЕ ЭНДПОИНТЫ =====================
 
 @app.route("/admin/bitrix/register", methods=["GET"])
@@ -1206,8 +1231,20 @@ def run_scheduler():
         schedule.run_pending()
         time.sleep(60)
 
+def ensure_left_menu_on_start():
+    """После деплоя сам привязывает пункт «Карточки WB» в левое меню,
+    если приложение уже установлено (есть сохранённый OAuth-токен)."""
+    if not load_oauth():
+        print("[МЕНЮ] OAuth ещё не настроен — пункт левого меню привяжется при установке")
+        return
+    try:
+        register_left_menu()
+    except Exception as e:
+        print(f"[МЕНЮ] Не удалось привязать пункт левого меню при старте: {e}")
+
 if __name__ == "__main__":
     init_db()
     threading.Thread(target=run_scheduler, daemon=True).start()
+    threading.Thread(target=ensure_left_menu_on_start, daemon=True).start()
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
