@@ -1855,15 +1855,42 @@ def run_scheduler():
         time.sleep(60)
 
 def ensure_left_menu_on_start():
-    """После деплоя сам привязывает пункт «Карточки WB» в левое меню,
-    если приложение уже установлено (есть сохранённый OAuth-токен)."""
+    """После деплоя привязывает ТОЛЬКО отсутствующие пункты левого меню,
+    не трогая уже привязанные — чтобы их позиция в меню (заданная
+    перетаскиванием) не сбрасывалась при каждом перезапуске."""
     if not load_oauth():
         print("[МЕНЮ] OAuth ещё не настроен — пункт левого меню привяжется при установке")
         return
+    items = [
+        (LEFT_MENU_HANDLER_URL, LEFT_MENU_TITLE,
+         "Массовое создание и редактирование карточек Wildberries"),
+        (SEASON_MENU_HANDLER_URL, SEASON_MENU_TITLE,
+         "Отчёт по распродаже сезонных товаров (остатки, динамика, скидки)"),
+    ]
     try:
-        register_left_menu()
+        existing = set()
+        try:
+            for pl in (bx_call("placement.get") or []):
+                if isinstance(pl, dict) and pl.get("placement") == "LEFT_MENU" and pl.get("handler"):
+                    existing.add(pl["handler"].rstrip("/"))
+        except Exception as e:
+            print(f"[МЕНЮ] placement.get недоступен: {e}")
+        for handler, title, desc in items:
+            if not handler:
+                continue
+            if handler.rstrip("/") in existing:
+                print(f"[МЕНЮ] уже привязан, позиция сохранена: {handler}")
+                continue
+            try:
+                bx_call("placement.bind", {
+                    "PLACEMENT": "LEFT_MENU", "HANDLER": handler,
+                    "TITLE": title, "DESCRIPTION": desc,
+                })
+                print(f"[МЕНЮ] добавлен пункт: {handler} ({title})")
+            except Exception as e:
+                print(f"[МЕНЮ] не удалось привязать {handler}: {e}")
     except Exception as e:
-        print(f"[МЕНЮ] Не удалось привязать пункт левого меню при старте: {e}")
+        print(f"[МЕНЮ] Не удалось проверить пункты левого меню при старте: {e}")
 
 if __name__ == "__main__":
     init_db()
