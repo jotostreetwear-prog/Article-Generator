@@ -1979,6 +1979,74 @@ def api_nk_create_gtins():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
+@app.route("/api/wb/parse-nk-file", methods=["POST"])
+def api_parse_nk_file():
+    """Разбирает Excel-шаблон Национального каталога (Честный ЗНАК):
+    достаёт по каждой строке артикул (Модель / артикул производителя) и
+    присвоенный ГТИН (Код товара). Возвращает строки для заполнения таблицы."""
+    f = request.files.get("file")
+    if not f:
+        return jsonify({"ok": False, "error": "Файл не загружен"}), 400
+    try:
+        import openpyxl
+    except Exception:
+        return jsonify({"ok": False, "error": "На сервере не установлен openpyxl (передеплойте после обновления requirements.txt)"}), 500
+    try:
+        wb = openpyxl.load_workbook(f, read_only=True, data_only=True)
+        ws = None
+        for s in wb.worksheets:
+            if s.title.lower().startswith("import"):
+                ws = s
+                break
+        ws = ws or wb.worksheets[0]
+        rows = list(ws.iter_rows(values_only=True))
+        if len(rows) < 5:
+            return jsonify({"ok": False, "error": "В файле нет данных (ожидается шаблон импорта НК)"}), 400
+
+        title_row = rows[0]
+        code_row = rows[1] if len(rows) > 1 else ()
+        marker_row = rows[2] if len(rows) > 2 else ()
+        ncols = max(len(title_row), len(code_row))
+
+        def cell(row, j):
+            return (str(row[j]).strip() if row is not None and j < len(row) and row[j] is not None else "")
+
+        def find_col(pred):
+            for j in range(ncols):
+                if pred(cell(title_row, j), cell(code_row, j), cell(marker_row, j)):
+                    return j
+            return -1
+
+        gtin_col = find_col(lambda t, c, m: c.upper() == "GTIN" or t.lower() == "код товара")
+        article_col = find_col(lambda t, c, m: "артикул производител" in t.lower() and m.lower() == "value")
+        if article_col < 0:
+            article_col = find_col(lambda t, c, m: "артикул" in t.lower() and m.lower() == "value")
+        name_col = find_col(lambda t, c, m: "полное наименование" in t.lower())
+        color_col = find_col(lambda t, c, m: t.lower() == "цвет")
+        if article_col < 0:
+            return jsonify({"ok": False, "error": "Не найден столбец «Модель / артикул производителя» — это шаблон импорта НК?"}), 400
+
+        out = []
+        for r in rows[4:]:  # данные начинаются с 5-й строки
+            art = cell(r, article_col)
+            if not art:
+                continue
+            out.append({
+                "article": art,
+                "gtin": cell(r, gtin_col) if gtin_col >= 0 else "",
+                "name": cell(r, name_col) if name_col >= 0 else "",
+                "color": cell(r, color_col) if color_col >= 0 else "",
+            })
+        with_gtin = sum(1 for x in out if x["gtin"])
+        return jsonify({
+            "ok": True, "rows": out, "count": len(out), "with_gtin": with_gtin,
+            "columns": {"article": article_col + 1,
+                        "gtin": (gtin_col + 1) if gtin_col >= 0 else None,
+                        "name": (name_col + 1) if name_col >= 0 else None},
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": "Не удалось разобрать файл: " + str(e)}), 500
+
 # ===================== FLASK: СЕРВИСНЫЕ ЭНДПОИНТЫ =====================
 
 @app.route("/admin/bitrix/register", methods=["GET"])

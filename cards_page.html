@@ -231,12 +231,25 @@ td textarea{min-height:40px}
 
     <div class="block" id="nkBlock">
       <h2>3 · Баркоды</h2>
-      <p class="note" style="margin-top:0">Баркоды можно <b>сгенерировать в Wildberries</b> (кнопка в таблице ниже) либо
-        получить <b>ГТИНы из Честного ЗНАка</b> и подставить автоматически.</p>
-      <div id="nkStatus" class="muted" style="margin-top:10px">Проверяю настройку Честного ЗНАка…</div>
+      <p class="note" style="margin-top:0">Баркоды можно <b>сгенерировать в Wildberries</b> (кнопка в таблице ниже),
+        получить <b>ГТИНы из Честного ЗНАка</b> по API, либо <b>загрузить файл из Честного ЗНАка</b> —
+        тогда таблица заполнится автоматически (артикул + ГТИН).</p>
+
+      <div style="margin-top:14px">
+        <label class="label">Файл из Честного ЗНАка (Excel-шаблон НК, .xlsx)</label>
+        <div class="row" style="margin-top:6px">
+          <input type="file" id="nkFile" accept=".xlsx" style="flex:1;min-width:220px">
+          <button class="btn secondary" id="nkFileBtn" type="button"><span class="spin"></span><span class="lbl">Загрузить файл и заполнить таблицу</span></button>
+        </div>
+        <p class="note">Берём артикул («Модель / артикул производителя») и присвоенный ГТИН («Код товара»).
+          Грузите файл уже <b>после присвоения ГТИНов</b> в ЧЗ — иначе баркоды будут пустыми.</p>
+        <div class="status" id="nkFileResult"></div>
+      </div>
+
+      <div id="nkStatus" class="muted" style="margin-top:14px">Проверяю настройку Честного ЗНАка…</div>
       <div class="row" style="margin-top:12px">
         <button class="btn secondary" id="nkCreateBtn" type="button" disabled>
-          <span class="spin"></span><span class="lbl">Создать ГТИНы в Честном ЗНАке и подставить</span>
+          <span class="spin"></span><span class="lbl">Создать ГТИНы в Честном ЗНАке по API</span>
         </button>
       </div>
       <div class="status" id="nkResult"></div>
@@ -558,7 +571,34 @@ $("genBarcodesBtn").addEventListener("click",async function(){
   finally{ spinOn($("genBarcodesBtn"),false,"Сгенерировать баркоды (WB)"); }
 });
 
-/* Баркоды из Честного ЗНАка (ГТИНы) */
+/* Баркоды из ФАЙЛА Честного ЗНАка — заполняем таблицу создания */
+$("nkFileBtn").addEventListener("click",async function(){
+  var f=$("nkFile").files[0];
+  if(!f){ showStatus($("nkFileResult"),false,"Выберите файл .xlsx"); return; }
+  var fd=new FormData(); fd.append("file",f);
+  spinOn($("nkFileBtn"),true,"Загружаю файл…");
+  try{
+    var r=await fetch("/api/wb/parse-nk-file",{method:"POST",body:fd});
+    var j=await r.json();
+    if(!j.ok){ showStatus($("nkFileResult"),false,j.error||"Ошибка разбора файла"); return; }
+    $("createBody").innerHTML="";
+    (j.rows||[]).forEach(function(row){
+      addRow();
+      var tr=$("createBody").lastElementChild;
+      tr.querySelector(".c-vc").value=row.article||"";
+      tr.querySelector(".c-title").value=row.name||"";
+      tr.querySelector(".c-bar").value=row.gtin||"";
+    });
+    if($("createBody").children.length===0) addRow();
+    var msg="Загружено строк: "+j.count+", из них с ГТИН (баркодом): "+j.with_gtin+".";
+    if(j.with_gtin===0) msg+=" ⚠ В файле ГТИНы пустые — выгрузите файл из ЧЗ после присвоения ГТИНов.";
+    else msg+=" Проверьте таблицу и создайте карточки на WB.";
+    showStatus($("nkFileResult"),j.with_gtin>0,msg);
+  }catch(e){ showStatus($("nkFileResult"),false,"Не удалось загрузить файл"); }
+  finally{ spinOn($("nkFileBtn"),false,"Загрузить файл и заполнить таблицу"); fit(); }
+});
+
+/* Баркоды из Честного ЗНАка (ГТИНы по API) */
 async function checkNkStatus(){
   var el=$("nkStatus"),btn=$("nkCreateBtn");
   try{
