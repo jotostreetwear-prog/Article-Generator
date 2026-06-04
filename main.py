@@ -59,6 +59,9 @@ EVENT_HANDLER_URL = f"{PUBLIC_BASE_URL}/bitrix/events" if PUBLIC_BASE_URL else "
 # Пункт левого меню Bitrix24 → открывает раздел массовых карточек WB
 LEFT_MENU_HANDLER_URL = f"{PUBLIC_BASE_URL}/cards" if PUBLIC_BASE_URL else ""
 LEFT_MENU_TITLE = "Карточки WB"
+# Отдельный пункт левого меню → раздел распродажи сезона (отчёт по шортам)
+SEASON_MENU_HANDLER_URL = f"{PUBLIC_BASE_URL}/season" if PUBLIC_BASE_URL else ""
+SEASON_MENU_TITLE = "Распродажа сезона"
 
 # Встроенные категории по инструкции JOTO (включая словоформы для чата)
 CATEGORIES = {
@@ -505,23 +508,30 @@ def register_bot():
     print(f"Бот зарегистрирован: BOT_ID={bot_id}")
     return bot_id
 
-def register_left_menu():
-    """Добавляет приложение отдельным пунктом в левое меню Bitrix24."""
-    if not LEFT_MENU_HANDLER_URL:
+def _bind_left_menu_item(handler_url, title, description):
+    """Привязывает один пункт левого меню Bitrix24 (с пере-привязкой без дублей)."""
+    if not handler_url:
         raise RuntimeError("PUBLIC_BASE_URL не задан — некуда вести пункт меню")
-    # снимаем старую привязку (если была) — чтобы не плодить дубли
     try:
-        bx_call("placement.unbind", {"PLACEMENT": "LEFT_MENU", "HANDLER": LEFT_MENU_HANDLER_URL})
+        bx_call("placement.unbind", {"PLACEMENT": "LEFT_MENU", "HANDLER": handler_url})
     except Exception:
         pass
     result = bx_call("placement.bind", {
         "PLACEMENT": "LEFT_MENU",
-        "HANDLER": LEFT_MENU_HANDLER_URL,
-        "TITLE": LEFT_MENU_TITLE,
-        "DESCRIPTION": "Массовое создание и редактирование карточек Wildberries",
+        "HANDLER": handler_url,
+        "TITLE": title,
+        "DESCRIPTION": description,
     })
-    print(f"Пункт левого меню зарегистрирован: {LEFT_MENU_HANDLER_URL}")
+    print(f"Пункт левого меню зарегистрирован: {handler_url} ({title})")
     return result
+
+def register_left_menu():
+    """Добавляет приложение пунктами в левое меню Bitrix24: карточки WB и распродажа."""
+    _bind_left_menu_item(LEFT_MENU_HANDLER_URL, LEFT_MENU_TITLE,
+                         "Массовое создание и редактирование карточек Wildberries")
+    _bind_left_menu_item(SEASON_MENU_HANDLER_URL, SEASON_MENU_TITLE,
+                         "Отчёт по распродаже сезонных товаров (остатки, динамика, скидки)")
+    return True
 
 # ===================== ДИАЛОГ: СОЗДАНИЕ АРТИКУЛА =====================
 
@@ -1776,7 +1786,10 @@ def admin_placement():
         return Response("forbidden", status=403)
     try:
         register_left_menu()
-        return jsonify({"ok": True, "handler": LEFT_MENU_HANDLER_URL, "title": LEFT_MENU_TITLE})
+        return jsonify({"ok": True, "items": [
+            {"handler": LEFT_MENU_HANDLER_URL, "title": LEFT_MENU_TITLE},
+            {"handler": SEASON_MENU_HANDLER_URL, "title": SEASON_MENU_TITLE},
+        ]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
