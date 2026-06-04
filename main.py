@@ -1609,11 +1609,11 @@ def report_now():
 def run_scheduler():
     schedule.every().day.at("06:00").do(check_ctr)        # 09:00 МСК
     schedule.every().day.at("15:00").do(generate_report)  # 18:00 МСК
-    schedule.every().monday.at("06:30").do(send_seasonal_report)  # 09:30 МСК, еженедельно
+    schedule.every().day.at("06:00").do(send_seasonal_report)  # 09:00 МСК, ежедневно
     print("Планировщик запущен:")
     print("  - CTR проверка каждый день в 09:00 МСК")
     print("  - Отчёт по задачам каждый день в 18:00 МСК")
-    print("  - Отчёт по сезонной распродаже каждый понедельник в 09:30 МСК")
+    print("  - Отчёт по сезонной распродаже каждый день в 09:00 МСК")
     while True:
         schedule.run_pending()
         time.sleep(60)
