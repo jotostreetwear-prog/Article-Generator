@@ -28,7 +28,8 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
 REPORT_USER_ID = os.environ.get("REPORT_USER_ID", "226").strip()
 CTR_ALERT_DIALOG = os.environ.get("CTR_ALERT_DIALOG", "chat2024").strip()
 # Чат «Отдел продаж» в Битрикс24 для отчёта по сезонной распродаже (DIALOG_ID: chatXXXX или ID пользователя)
-SALES_DEPT_DIALOG = os.environ.get("SALES_DEPT_DIALOG", "").strip() or CTR_ALERT_DIALOG
+# По умолчанию — chat2024 (https://joto.bitrix24.ru/online/?IM_DIALOG=chat2024)
+SALES_DEPT_DIALOG = os.environ.get("SALES_DEPT_DIALOG", "").strip() or "chat2024"
 # Категория для еженедельного авто-отчёта по сезонной распродаже и конец сезона
 SEASON_REPORT_CATEGORY = os.environ.get("SEASON_REPORT_CATEGORY", "10").strip()
 SEASON_END_DATE = os.environ.get("SEASON_END_DATE", "2026-08-31").strip()
