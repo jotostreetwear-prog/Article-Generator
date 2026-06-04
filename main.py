@@ -1195,8 +1195,33 @@ def fetch_wb_stocks():
     return wb_stats_request("/api/v1/supplier/stocks", params={"dateFrom": "2020-01-01"})
 
 def fetch_wb_orders(date_from):
-    """Заказы с указанной даты (flag=0 — всё, что менялось/создавалось с date_from)."""
-    return wb_stats_request("/api/v1/supplier/orders", params={"dateFrom": date_from, "flag": 0})
+    """Все заказы с указанной даты, с пагинацией по lastChangeDate (flag=0).
+
+    WB отдаёт заказы пачками (до ~80 000 за ответ). Чтобы охватить весь объём
+    (все шорты без потерь), идём по курсору lastChangeDate и дедупим по srid.
+    """
+    collected = {}
+    cursor_from = date_from
+    for _ in range(60):  # защита от зацикливания
+        batch = wb_stats_request("/api/v1/supplier/orders",
+                                 params={"dateFrom": cursor_from, "flag": 0})
+        if not batch:
+            break
+        new_count = 0
+        max_lc = cursor_from
+        for o in batch:
+            key = o.get("srid") or f"{o.get('gNumber')}_{o.get('nmId')}_{o.get('barcode')}_{o.get('date')}"
+            if key not in collected:
+                collected[key] = o
+                new_count += 1
+            lc = o.get("lastChangeDate") or ""
+            if lc > max_lc:
+                max_lc = lc
+        # больше нет сдвига по времени или новых записей — конец выгрузки
+        if new_count == 0 or max_lc == cursor_from:
+            break
+        cursor_from = max_lc
+    return list(collected.values())
 
 def _match_seasonal(rec, category_code, keywords):
     """Запись относится к нужной категории по артикулу J<код>… или по названию предмета."""
