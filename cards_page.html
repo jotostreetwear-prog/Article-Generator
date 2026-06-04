@@ -132,7 +132,6 @@ select:focus,input:focus,textarea:focus{border-color:var(--line-strong);
             <option value="vendorCode">Артикул (vendorCode)</option>
             <option value="subjectID">Категория</option>
             <option value="characteristic">Характеристика</option>
-            <option value="barcode">Баркод (добавить)</option>
           </select>
         </div>
         <div class="field" id="charcPickWrap" hidden>
@@ -154,7 +153,6 @@ select:focus,input:focus,textarea:focus{border-color:var(--line-strong);
           <label class="label" for="valLine">Новое значение</label>
           <input id="valLine" type="text" autocomplete="off">
         </div>
-        <button class="btn secondary" id="genBarcodeBtn" type="button" hidden><span class="spin"></span><span class="lbl">Сгенерировать баркод</span></button>
       </div>
       <p class="note" id="editNote"></p>
 
@@ -260,9 +258,8 @@ function updateFieldUI(){
   $("valLineWrap").hidden=(bigText||f==="subjectID");
   $("charcPickWrap").hidden=(f!=="characteristic");
   $("subjPickWrap").hidden=(f!=="subjectID");
-  $("genBarcodeBtn").hidden=(f!=="barcode");
   var note="";
-  if(f==="vendorCode"||f==="barcode") note="⚠ Это поле уникально для каждой карточки — применяйте к одной карточке за раз.";
+  if(f==="vendorCode") note="⚠ Это поле уникально для каждой карточки — применяйте к одной карточке за раз.";
   if(f==="subjectID") note="⚠ Wildberries не всегда разрешает смену категории у существующей карточки — при отказе WB вернёт ошибку.";
   if(f==="characteristic") note="Список характеристик собран из выбранных карточек. Несколько значений вводите через запятую.";
   $("editNote").textContent=note;
@@ -317,20 +314,9 @@ async function loadSubjectsInto(sel,name){
   }catch(e){ sel.innerHTML='<option value="">ошибка загрузки</option>'; }
 }
 
-/* генерация одного баркода (для поля «Баркод») */
-$("genBarcodeBtn").addEventListener("click",async function(){
-  spinOn($("genBarcodeBtn"),true,"…");
-  try{
-    var j=await api("/api/wb/barcodes",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({count:1})});
-    if(j.ok&&j.barcodes&&j.barcodes.length){ $("valLine").value=j.barcodes[0]; }
-    else alert("Не удалось получить баркод: "+(j.error||""));
-  }catch(e){ alert("Ошибка генерации баркода"); }
-  finally{ spinOn($("genBarcodeBtn"),false,"Сгенерировать баркод"); }
-});
-
 function selectedCards(){ return ALL_CARDS.filter(function(c){return selected.has(c.nmID);}); }
 
-var FIELD_LABELS={description:"SEO-описание",title:"Название",brand:"Бренд",vendorCode:"Артикул",subjectID:"Категория",characteristic:"Характеристика",barcode:"Баркод"};
+var FIELD_LABELS={description:"SEO-описание",title:"Название",brand:"Бренд",vendorCode:"Артикул",subjectID:"Категория",characteristic:"Характеристика"};
 function truncate(s){ s=String(s==null?"":s); return s.length>44?s.slice(0,44)+"…":s; }
 function findCharc(card,id){ var a=card.characteristics||[]; for(var i=0;i<a.length;i++){ if(a[i].id===id) return a[i]; } return null; }
 
@@ -362,10 +348,8 @@ function previewText(p){
     var oldv;
     if(f==="characteristic"){ var ch=findCharc(c,p.charcId); oldv=ch?(ch.value||[]).join(", "):"—"; }
     else if(f==="subjectID"){ oldv=c.subjectName||"—"; }
-    else if(f==="barcode"){ oldv=(c.barcodes||[]).join(", ")||"нет"; }
     else { oldv=c[f]; }
-    if(f==="barcode") lines.push(c.vendorCode+":  + "+newv);
-    else lines.push(c.vendorCode+":  "+truncate(oldv||"—")+"  →  "+truncate(newv));
+    lines.push(c.vendorCode+":  "+truncate(oldv||"—")+"  →  "+truncate(newv));
   });
   if(p.cards.length>8) lines.push("…и ещё "+(p.cards.length-8)+" карточек");
   return lines.join("\n");
@@ -375,8 +359,8 @@ var pendingPayload=null;
 $("applyBtn").addEventListener("click",function(){
   var p=buildEditPayload(); if(!p) return;
   pendingPayload=p;
-  var warn=((p.field==="barcode"||p.field==="vendorCode")&&p.cards.length>1)
-    ? "  ⚠ Это поле уникально для каждой карточки — не задавайте одно значение нескольким!" : "";
+  var warn=(p.field==="vendorCode"&&p.cards.length>1)
+    ? "  ⚠ Артикул уникален для каждой карточки — не задавайте одно значение нескольким!" : "";
   $("confirmText").innerHTML="Будет изменено поле «"+esc(p.label)+"» у <b>"+p.cards.length+"</b> карточк(и) на Wildberries."+esc(warn);
   $("confirmPreview").textContent=previewText(p);
   $("confirmBox").style.display="block";
