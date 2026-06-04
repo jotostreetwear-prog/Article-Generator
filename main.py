@@ -1455,6 +1455,32 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
                    f"Иначе в неликвид ляжет ~{total_deadstock} шт. "
                    f"Рекомендуемая средняя скидка ~{rec_disc_total} %.")
 
+    # --- сценарии «что если поднять скидку» ---
+    # Модель: +1 п.п. скидки ≈ +elasticity% к заказам. Считаем, как изменится темп,
+    # за сколько распродадим цель (90%) и сколько останется к концу сезона.
+    scenarios = []
+    if total_stock > 0 and cur_daily > 0:
+        base_days_to_target = need_sell / cur_daily if cur_daily > 0 else None
+        for delta in [0, 5, 10, 15, 20, 30]:
+            total_disc = min(85, int(round(avg_disc + delta)))
+            new_daily = cur_daily * (1 + elasticity * delta / 100.0)
+            if new_daily <= 0:
+                continue
+            days_to_target = need_sell / new_daily
+            s_proj_left = max(0.0, total_stock - new_daily * days_left)
+            s_proj_left_pct = round(s_proj_left / total_stock * 100, 1) if total_stock else 0.0
+            saved = int(round(base_days_to_target - days_to_target)) if base_days_to_target else 0
+            scenarios.append({
+                "addDiscount": delta,                      # +п.п. к текущей скидке
+                "discount": total_disc,                    # итоговая скидка, %
+                "dailyRate": round(new_daily, 2),          # прогноз темпа, шт/день
+                "daysToTarget": int(round(days_to_target)),# за сколько распродадим 90%
+                "daysSaved": max(0, saved),                # на сколько дней быстрее, чем сейчас
+                "selloutDate": (today + timedelta(days=int(round(days_to_target)))).isoformat(),
+                "projLeftPct": s_proj_left_pct,            # остаток к концу сезона, %
+                "hitsTarget": days_to_target <= days_left, # успеваем ли к концу сезона
+            })
+
     return {
         "title": title,
         "categoryCode": category_code,
@@ -1478,6 +1504,7 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
             "deadstock": total_deadstock,
             "currentDiscount": round(avg_disc, 1),
             "recommendedDiscount": rec_disc_total,
+            "scenarios": scenarios,
             "verdict": verdict,
         },
         "rows": rows,
@@ -1556,6 +1583,22 @@ def build_seasonal_report_message(rep):
         for r in risky:
             disc = f"{r['currentDiscount']}%→{r['recommendedDiscount']}%" if r['recommendedDiscount'] != r['currentDiscount'] else f"{r['currentDiscount']}%"
             lines.append(f"• {r.get('vendorCode') or r.get('nmId')} — остаток {r['stock']}, {r['dailyRate']}/день, в неликвид {r['deadstock']} шт, скидка {disc}")
+
+    # Сценарии «что если поднять скидку» — прогноз темпа и срока распродажи
+    scen = [c for c in s.get("scenarios", []) if c.get("addDiscount", 0) > 0]
+    if scen:
+        lines.append("")
+        lines.append("📈 *Если снизить цену (поднять скидку):*")
+        for c in scen:
+            mark = "✅" if c["hitsTarget"] else "▫️"
+            faster = f", это на {c['daysSaved']} дн быстрее" if c.get("daysSaved") else ""
+            lines.append(
+                f"{mark} скидка {c['discount']}% → ~{c['dailyRate']} шт/день · "
+                f"распродадим за ~{c['daysToTarget']} дн (к {_fmt_date_ru(c['selloutDate'])}){faster}, "
+                f"остаток к концу сезона ~{c['projLeftPct']}%"
+            )
+        lines.append("✅ — успеваем продать цель до конца сезона")
+
     lines.append("")
     lines.append(f"📊 Полная таблица: {season_url}")
     return "\n".join(lines)

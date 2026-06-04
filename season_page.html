@@ -143,6 +143,18 @@ tbody tr:hover{ background:var(--surface-2); }
   <div id="report" hidden>
     <div class="verdict"><div class="vh">Вывод и план</div><div id="verdict"></div></div>
     <div class="kpis" id="kpis"></div>
+
+    <div id="scenblock" hidden>
+      <div class="vh" style="font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;font-weight:700;color:var(--ink-3);margin:6px 2px 10px">Сценарии по цене — если снизить цену (поднять скидку)</div>
+      <div class="tablewrap" style="margin-bottom:22px">
+        <table style="min-width:640px">
+          <thead><tr>
+            <th>Скидка</th><th>Прогноз темпа</th><th>Распродадим за</th><th>Быстрее на</th><th>Остаток к концу сезона</th><th>В цель</th>
+          </tr></thead>
+          <tbody id="scentbody"></tbody>
+        </table>
+      </div>
+    </div>
     <div class="tablewrap">
       <table>
         <thead><tr>
@@ -217,6 +229,21 @@ function render(rep){
       '<td><span class="pill '+st[1]+'">'+st[0]+'</span></td>';
     tb.appendChild(tr);
   });
+  // сценарии по цене
+  var scen=(s.scenarios||[]).filter(function(c){return c.addDiscount>0;});
+  var stb=$("scentbody"); stb.innerHTML="";
+  scen.forEach(function(c){
+    var tr=document.createElement("tr");
+    tr.innerHTML=
+      '<td><b>'+c.discount+'%</b></td>'+
+      '<td>'+c.dailyRate+' шт/день</td>'+
+      '<td>~'+c.daysToTarget+' дн <span class="sub">(к '+fmtDate(c.selloutDate)+')</span></td>'+
+      '<td>'+(c.daysSaved>0?('−'+c.daysSaved+' дн'):"—")+'</td>'+
+      '<td>'+c.projLeftPct+'%</td>'+
+      '<td>'+(c.hitsTarget?'<span class="pill ok">успеваем</span>':'<span class="pill accelerate">мало</span>')+'</td>';
+    stb.appendChild(tr);
+  });
+  $("scenblock").hidden = scen.length===0;
   $("empty").hidden = (rep.rows||[]).length>0;
   $("report").hidden = false;
   sendBtn.disabled = false;
@@ -250,11 +277,20 @@ function demoReport(p){
   var curDaily=rows.reduce(function(s,r){return s+r.dailyRate;},0);
   var proj=Math.max(0,Math.round(tot-curDaily*daysLeft));
   var req=Math.max(0,tot*(1-tgt))/daysLeft;
+  var need=Math.max(0,tot*(1-tgt)), el=2, base=curDaily>0?need/curDaily:0, scen=[];
+  [0,5,10,15,20,30].forEach(function(d){
+    var nd=curDaily*(1+el*d/100); if(nd<=0) return;
+    var dtt=need/nd, pl=Math.max(0,tot-nd*daysLeft);
+    scen.push({addDiscount:d,discount:Math.min(85,Math.round(13+d)),dailyRate:Math.round(nd*100)/100,
+      daysToTarget:Math.round(dtt),daysSaved:Math.max(0,Math.round(base-dtt)),
+      selloutDate:new Date(today.getTime()+dtt*864e5).toISOString(),
+      projLeftPct:tot?Math.round(pl/tot*1000)/10:0,hitsTarget:dtt<=daysLeft});
+  });
   return {title:"Шорты (демо)",seasonEnd:p.seasonEnd,daysLeft:daysLeft,lookbackDays:parseInt(p.lookback)||28,
     targetRemainPct:parseFloat(p.targetPct),generatedAt:"демо",
     summary:{totalStock:tot,soldRecent:sold,currentDaily:Math.round(curDaily*100)/100,trendPct:6.4,
       daysOfSupply:Math.round(tot/curDaily),depletionDate:new Date(today.getTime()+tot/curDaily*864e5).toISOString(),
-      requiredDaily:Math.round(req*100)/100,projLeft:proj,projLeftPct:Math.round(proj/tot*1000)/10,
+      requiredDaily:Math.round(req*100)/100,projLeft:proj,projLeftPct:Math.round(proj/tot*1000)/10,scenarios:scen,
       targetLeftUnits:Math.round(tot*tgt),deadstock:Math.max(0,Math.round(proj-tot*tgt)),currentDiscount:13,recommendedDiscount:38,
       verdict:"Не успеваем: сейчас "+(Math.round(curDaily*10)/10)+" шт/день, чтобы к "+p.seasonEnd+" осталось ≤"+p.targetPct+"% нужно "+(Math.round(req*10)/10)+" шт/день. Иначе в неликвид ляжет ~"+Math.max(0,Math.round(proj-tot*tgt))+" шт. Рекомендуемая средняя скидка ~38%. (демо-данные)"},
     rows:rows,count:rows.length};
