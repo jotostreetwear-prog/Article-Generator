@@ -56,7 +56,12 @@ BOT_NAME = "Article Generator"
 BOT_CODE = "joto_article_bot"
 
 EVENT_HANDLER_URL = f"{PUBLIC_BASE_URL}/bitrix/events" if PUBLIC_BASE_URL else ""
-# Пункт левого меню Bitrix24 → открывает раздел массовых карточек WB
+# Пункты левого меню Bitrix24 — каждый раздел отдельным пунктом
+LEFT_MENU_ITEMS = [
+    {"path": "/cards",  "title": "Карточки WB",       "desc": "Массовое создание и редактирование карточек Wildberries"},
+    {"path": "/season", "title": "Распродажа сезона", "desc": "Отчёт и план по сезонной распродаже"},
+]
+# Совместимость со старыми ссылками/эндпоинтами
 LEFT_MENU_HANDLER_URL = f"{PUBLIC_BASE_URL}/cards" if PUBLIC_BASE_URL else ""
 LEFT_MENU_TITLE = "Карточки WB"
 
@@ -506,22 +511,26 @@ def register_bot():
     return bot_id
 
 def register_left_menu():
-    """Добавляет приложение отдельным пунктом в левое меню Bitrix24."""
-    if not LEFT_MENU_HANDLER_URL:
-        raise RuntimeError("PUBLIC_BASE_URL не задан — некуда вести пункт меню")
-    # снимаем старую привязку (если была) — чтобы не плодить дубли
-    try:
-        bx_call("placement.unbind", {"PLACEMENT": "LEFT_MENU", "HANDLER": LEFT_MENU_HANDLER_URL})
-    except Exception:
-        pass
-    result = bx_call("placement.bind", {
-        "PLACEMENT": "LEFT_MENU",
-        "HANDLER": LEFT_MENU_HANDLER_URL,
-        "TITLE": LEFT_MENU_TITLE,
-        "DESCRIPTION": "Массовое создание и редактирование карточек Wildberries",
-    })
-    print(f"Пункт левого меню зарегистрирован: {LEFT_MENU_HANDLER_URL}")
-    return result
+    """Регистрирует каждый раздел отдельным пунктом левого меню Bitrix24."""
+    if not PUBLIC_BASE_URL:
+        raise RuntimeError("PUBLIC_BASE_URL не задан — некуда вести пункты меню")
+    bound = []
+    for item in LEFT_MENU_ITEMS:
+        handler = f"{PUBLIC_BASE_URL}{item['path']}"
+        # снимаем старую привязку (если была) — чтобы не плодить дубли
+        try:
+            bx_call("placement.unbind", {"PLACEMENT": "LEFT_MENU", "HANDLER": handler})
+        except Exception:
+            pass
+        bx_call("placement.bind", {
+            "PLACEMENT": "LEFT_MENU",
+            "HANDLER": handler,
+            "TITLE": item["title"],
+            "DESCRIPTION": item.get("desc", ""),
+        })
+        print(f"Пункт левого меню зарегистрирован: {handler} — {item['title']}")
+        bound.append(handler)
+    return bound
 
 # ===================== ДИАЛОГ: СОЗДАНИЕ АРТИКУЛА =====================
 
