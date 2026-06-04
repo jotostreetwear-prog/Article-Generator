@@ -102,6 +102,8 @@ tbody tr:hover{ background:var(--surface-2); }
 .thumb.ph{ display:inline-block; }
 .thumbwrap{ line-height:0; display:inline-flex; flex:0 0 auto; }
 .thumb:hover{ filter:brightness(1.05); }
+.recprice{ color:var(--accent-deep); white-space:nowrap; }
+[data-theme="dark"] .recprice{ color:var(--accent); }
 tr.sizedetail td{ background:var(--surface-2); padding:10px 14px; }
 .szwrap{ display:flex; flex-wrap:wrap; gap:8px; }
 .szchip{ font-size:12px; padding:5px 10px; border-radius:8px; border:1px solid var(--line); background:var(--surface); white-space:nowrap; }
@@ -178,7 +180,7 @@ tr.sizedetail td{ background:var(--surface-2); padding:10px 14px; }
       <div class="tablewrap" style="margin-bottom:22px">
         <table style="min-width:560px">
           <thead><tr>
-            <th>Размер</th><th>Нач. остаток<br><span class="sub">факт</span></th><th>Остаток</th><th>Заказов/день</th><th>Хватит до</th><th>Остаток к концу сезона</th><th>Скидка</th><th>Цена ₽</th><th>Статус</th>
+            <th>Размер</th><th>Нач. остаток<br><span class="sub">факт</span></th><th>Остаток</th><th>Заказов/день</th><th>Хватит до</th><th>Остаток к концу сезона</th><th>Скидка</th><th>Цена сейчас ₽</th><th>Реком. цена ₽<br><span class="sub">под темп</span></th><th>Мин. цена ₽<br><span class="sub">по марже</span></th><th>Статус</th>
           </tr></thead>
           <tbody id="sizetbody"></tbody>
         </table>
@@ -201,7 +203,7 @@ tr.sizedetail td{ background:var(--surface-2); padding:10px 14px; }
         <thead><tr>
           <th>Артикул</th><th>Нач. остаток<br><span class="sub">факт</span></th><th>Остаток</th><th>Заказов/день</th><th>Динамика</th>
           <th>Хватит до</th><th>Прогноз остатка</th><th>Нужно/день</th>
-          <th>В неликвид</th><th>Скидка</th><th>Цена ₽</th><th>Статус</th>
+          <th>В неликвид</th><th>Скидка</th><th>Цена сейчас ₽</th><th>Реком. цена ₽<br><span class="sub">под темп</span></th><th>Мин. цена ₽<br><span class="sub">по марже</span></th><th>Статус</th>
         </tr></thead>
         <tbody id="tbody"></tbody>
       </table>
@@ -250,6 +252,9 @@ function thumb(nm){ var u=wbImg(nm); if(!u) return '<span class="thumb ph"></spa
 function priceHtml(cur,rec){ if(cur==null) return '<span class="sub">—</span>';
   if(rec==null||rec===cur) return '<b>'+fmt(cur)+'</b> ₽';
   return '<span class="sub" style="text-decoration:line-through">'+fmt(cur)+'</span> <b>'+fmt(rec)+'</b> ₽'; }
+function priceCell(v){ return (v==null)?'<span class="sub">—</span>':(fmt(v)+' ₽'); }
+function recPriceCell(v){ return (v==null)?'<span class="sub">—</span>':('<b class="recprice">'+fmt(v)+' ₽</b>'); }
+function minPriceCell(v){ return (v==null)?'<span class="sub">—</span>':('<span class="sub">'+fmt(v)+' ₽</span>'); }
 var STATUS={ok:["В графике","ok"],accelerate:["Ускорить","accelerate"],stuck:["Стоит","stuck"],empty:["Нет остатка","empty"]};
 
 function params(){
@@ -276,7 +281,7 @@ function render(rep){
     kpi("Распродать к сезону", fmt(s.needSell)+" шт", "темп "+s.requiredDaily+"/день · цель ≤"+rep.targetRemainPct+"% "+(s.targetFromInitial?"от нач. остатка":"от текущего")+" ("+fmt(s.targetLeftUnits)+" шт)") +
     kpi("Прогноз неликвида", fmt(s.deadstock)+" шт", "при текущем темпе останется "+s.projLeftPct+"%", s.deadstock>0?"down":"up") +
     kpi("Скидка", s.recommendedDiscount+"%", "сейчас ~"+s.currentDiscount+"% · рекомендуем") +
-    (s.currentPrice!=null ? kpi("Рекоменд. цена", fmt(s.recommendedPrice)+" ₽", "сейчас ~"+fmt(s.currentPrice)+" ₽ → после скидки") : "") +
+    (s.currentPrice!=null ? kpi("Рекоменд. цена", fmt(s.recommendedPrice)+" ₽", "сейчас ~"+fmt(s.currentPrice)+" ₽"+(s.minPrice!=null?" · мин "+fmt(s.minPrice)+" ₽":"")) : "") +
     kpi("Потолок по марже", (s.maxDiscountByMargin!=null?s.maxDiscountByMargin+"%":"—"), (s.marginLimited?"⚠️ упёрлись в маржу":"себест. "+s.costSharePct+"% · маржа "+s.minMarginPct+"%"), s.marginLimited?"down":"");
   // аналитика по размерам (по категории)
   var sizes=s.sizes||[];
@@ -292,7 +297,9 @@ function render(rep){
       '<td>'+(z.daysOfSupply==null?'<span class="sub">∞</span>':z.daysOfSupply+" дн")+'</td>'+
       '<td>'+z.projLeftPct+'%</td>'+
       '<td>'+discHtml(z.currentDiscount,z.recommendedDiscount)+'</td>'+
-      '<td>'+priceHtml(z.currentPrice,z.recommendedPrice)+'</td>'+
+      '<td>'+priceCell(z.currentPrice)+'</td>'+
+      '<td>'+recPriceCell(z.recommendedPrice)+'</td>'+
+      '<td>'+minPriceCell(z.minPrice)+'</td>'+
       '<td><span class="pill '+st[1]+'">'+st[0]+'</span></td>';
     ztb.appendChild(tr);
   });
@@ -315,7 +322,9 @@ function render(rep){
       '<td>'+r.requiredDaily+'</td>'+
       '<td>'+(r.deadstock>0?'<b>'+fmt(r.deadstock)+'</b>':"—")+'</td>'+
       '<td>'+discHtml(r.currentDiscount,r.recommendedDiscount)+'</td>'+
-      '<td>'+priceHtml(r.currentPrice,r.recommendedPrice)+'</td>'+
+      '<td>'+priceCell(r.currentPrice)+'</td>'+
+      '<td>'+recPriceCell(r.recommendedPrice)+'</td>'+
+      '<td>'+minPriceCell(r.minPrice)+'</td>'+
       '<td><span class="pill '+st[1]+'">'+st[0]+'</span></td>';
     tb.appendChild(tr);
     if(hasSizes){
@@ -326,7 +335,7 @@ function render(rep){
         var d=(z.recommendedDiscount!=null&&z.recommendedDiscount!==z.currentDiscount)?(' · скидка '+z.currentDiscount+'%→'+z.recommendedDiscount+'%'):(z.currentDiscount!=null?(' · скидка '+z.currentDiscount+'%'):'');
         return '<span class="szchip '+cls+'"><b>'+z.size+'</b> '+fmt(z.stock)+' шт · '+z.dailyRate+'/д · ост '+z.projLeftPct+'%'+d+(z.status==="stuck"&&z.stock>0?' ⚠️':'')+'</span>';
       }).join("");
-      det.innerHTML='<td colspan="12"><div class="szwrap">'+chips+'</div></td>';
+      det.innerHTML='<td colspan="14"><div class="szwrap">'+chips+'</div></td>';
       tb.appendChild(det);
       tr.addEventListener("click",function(){
         det.hidden=!det.hidden;
@@ -352,7 +361,9 @@ function render(rep){
   $("scenblock").hidden = scen.length===0;
   $("methodology").innerHTML = "ⓘ Источник: WB Статистика. Темп = заказы после отмён за период "+
     fmtDate(rep.periodStart)+"–"+fmtDate(rep.periodEnd)+" ("+rep.lookbackDays+" дн), они же списывают остаток. "+
-    "Остаток = quantityFull по всем складам на сейчас. Артикулов в категории: "+(rep.count!=null?rep.count:(rep.rows||[]).length)+".";
+    "Остаток = quantityFull по всем складам на сейчас. Цена — из WB «Цены и скидки», мин. цена — предел по марже. "+
+    "Артикулов в категории: "+(rep.count!=null?rep.count:(rep.rows||[]).length)+"."+
+    (s.pricesAvailable===false?" <b style='color:var(--bad)'>⚠️ Цены не загрузились — у WB-токена нет доступа к категории «Цены и скидки».</b>":"");
   $("empty").hidden = (rep.rows||[]).length>0;
   $("report").hidden = false;
   sendBtn.disabled = false;
@@ -397,7 +408,7 @@ function demoReport(p){
         initialStock:sInit,soldSinceStart:sSold,
         projLeftPct:sStock?Math.round(sProj/sStock*1000)/10:0,status:sStat,
         currentDiscount:cur,recommendedDiscount:sRec,
-        currentPrice:Math.round(2990*(1-cur/100)),recommendedPrice:Math.round(2990*(1-sRec/100))});
+        currentPrice:Math.round(2990*(1-cur/100)),recommendedPrice:Math.round(2990*(1-sRec/100)),minPrice:Math.round(2990*(1-maxDisc/100))});
       szTot[z]=szTot[z]||{stock:0,recent:0,proj:0,init:0};
       szTot[z].stock+=sStock; szTot[z].recent+=Math.round(sDaily*28); szTot[z].proj+=sProj; szTot[z].init+=sInit;
     });
@@ -418,7 +429,7 @@ function demoReport(p){
       daysOfSupply:dos,depletionDate:dos?new Date(today.getTime()+dos*864e5).toISOString():null,
       projLeft:proj,projLeftPct:stock?Math.round(proj/stock*1000)/10:0,requiredDaily:Math.round(req*100)/100,
       deadstock:ds,currentDiscount:cur,recommendedDiscount:rec,
-      currentPrice:Math.round(2990*(1-cur/100)),recommendedPrice:Math.round(2990*(1-rec/100)),
+      currentPrice:Math.round(2990*(1-cur/100)),recommendedPrice:Math.round(2990*(1-rec/100)),minPrice:Math.round(2990*(1-maxDisc/100)),
       status:status,sizes:mkSizes(stock,daily,cur)});
     tot+=stock; sold+=Math.round(daily*win); dead+=ds; totInit+=initial;
   });
@@ -444,7 +455,7 @@ function demoReport(p){
       initialStock:d.init,soldSinceStart:Math.max(0,d.init-d.stock),
       projLeftPct:d.stock?Math.round(d.proj/d.stock*1000)/10:0,status:d.stock<=0?"empty":(sd<=0?"stuck":"ok"),
       currentDiscount:13,recommendedDiscount:sRec,
-      currentPrice:Math.round(2990*0.87),recommendedPrice:Math.round(2990*(1-sRec/100))};});
+      currentPrice:Math.round(2990*0.87),recommendedPrice:Math.round(2990*(1-sRec/100)),minPrice:Math.round(2990*(1-maxDisc/100))};});
   var dead=Math.max(0,Math.round(proj-tgtUnits));
   return {title:"Шорты (демо)",seasonEnd:p.seasonEnd,daysLeft:daysLeft,lookbackDays:win,
     periodStart:pStart,periodEnd:pEnd,targetRemainPct:parseFloat(p.targetPct),generatedAt:"демо",
@@ -453,7 +464,7 @@ function demoReport(p){
       requiredDaily:Math.round(req*100)/100,needSell:need,targetFromInitial:true,projLeft:proj,projLeftPct:Math.round(proj/tot*1000)/10,scenarios:scen,sizes:sizeSum,
       maxDiscountByMargin:maxDisc,marginLimited:38>maxDisc,costSharePct:Math.round(cs*100),minMarginPct:Math.round(mm*100),
       targetLeftUnits:tgtUnits,deadstock:dead,currentDiscount:13,recommendedDiscount:recTot,
-      currentPrice:Math.round(2990*0.87),recommendedPrice:Math.round(2990*(1-recTot/100)),
+      currentPrice:Math.round(2990*0.87),recommendedPrice:Math.round(2990*(1-recTot/100)),minPrice:Math.round(2990*(1-maxDisc/100)),pricesAvailable:true,
       verdict:"Не успеваем: сейчас "+(Math.round(curDaily*10)/10)+" шт/день. Чтобы к "+p.seasonEnd+" осталось ≤"+p.targetPct+"% от начального остатка ("+tgtUnits+" шт), нужно распродать "+need+" шт — темп "+(Math.round(req*10)/10)+" шт/день. Иначе в неликвид ляжет ~"+dead+" шт. Рекомендуемая средняя скидка ~"+recTot+"%. (демо-данные)"},
     rows:rows,count:rows.length};
 }
