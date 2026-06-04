@@ -1337,6 +1337,19 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     target_frac = max(0.0, min(float(target_remain_pct) / 100.0, 1.0))
     elasticity = max(0.2, float(elasticity))
 
+    def _rec_disc_for(s_stock, s_daily, base_disc):
+        """Рекомендуемая скидка под конкретный остаток/темп, чтобы успеть к цели."""
+        base = int(round(base_disc or 0))
+        if s_stock <= 0:
+            return base
+        s_req = s_stock * (1 - target_frac) / days_left
+        if s_daily <= 0:                                  # стоит без продаж — агрессивно
+            return min(85, max(base + 30, 40))
+        if s_req > s_daily:                               # не успеваем — поднять скидку
+            up = (s_req / s_daily - 1) * 100.0
+            return min(85, int(round(base + up / elasticity)))
+        return base                                       # темпа хватает
+
     orders = fetch_wb_orders(start_prev.strftime("%Y-%m-%d"))
     stocks = fetch_wb_stocks()
 
@@ -1453,6 +1466,8 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
                 "size": sz, "stock": int(s_stock), "soldRecent": s_recent,
                 "dailyRate": round(s_daily, 2), "daysOfSupply": s_dos,
                 "projLeftPct": s_pct, "status": s_status,
+                "currentDiscount": int(cur_disc),
+                "recommendedDiscount": _rec_disc_for(s_stock, s_daily, cur_disc),
             })
         size_rows.sort(key=lambda x: x["stock"], reverse=True)
 
@@ -1578,6 +1593,8 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
             "size": sz, "stock": int(st), "soldRecent": rc,
             "dailyRate": round(s_daily, 2), "daysOfSupply": s_dos,
             "projLeftPct": s_pct, "status": s_status,
+            "currentDiscount": int(round(avg_disc)),
+            "recommendedDiscount": _rec_disc_for(st, s_daily, avg_disc),
         })
     size_summary.sort(key=lambda x: _size_key(x["size"]))
 
@@ -1689,10 +1706,12 @@ def build_seasonal_report_message(rep):
     sizes = s.get("sizes", [])
     if sizes:
         lines.append("")
-        lines.append("📐 *По размерам* (остаток · продаж/день · останется к концу сезона):")
+        lines.append("📐 *По размерам* (остаток · продаж/день · останется · скидка):")
         for z in sizes:
             flag = " ⚠️" if z["status"] == "stuck" and z["stock"] > 0 else ""
-            lines.append(f"• {z['size']}: {z['stock']} шт · {z['dailyRate']}/день · ~{z['projLeftPct']}%{flag}")
+            rec, cur = z.get("recommendedDiscount"), z.get("currentDiscount")
+            disc = f"{cur}%→*{rec}%*" if (rec is not None and rec != cur) else (f"{cur}%" if cur is not None else "")
+            lines.append(f"• {z['size']}: {z['stock']} шт · {z['dailyRate']}/день · ~{z['projLeftPct']}% · скидка {disc}{flag}")
 
     # Сценарии «что если поднять скидку» — прогноз темпа и срока распродажи
     scen = [c for c in s.get("scenarios", []) if c.get("addDiscount", 0) > 0]

@@ -157,7 +157,7 @@ tr.sizedetail td{ background:var(--surface-2); padding:10px 14px; }
       <div class="tablewrap" style="margin-bottom:22px">
         <table style="min-width:560px">
           <thead><tr>
-            <th>Размер</th><th>Остаток</th><th>Продаж/день</th><th>Хватит до</th><th>Остаток к концу сезона</th><th>Статус</th>
+            <th>Размер</th><th>Остаток</th><th>Продаж/день</th><th>Хватит до</th><th>Остаток к концу сезона</th><th>Скидка</th><th>Статус</th>
           </tr></thead>
           <tbody id="sizetbody"></tbody>
         </table>
@@ -244,6 +244,7 @@ function render(rep){
       '<td>'+z.dailyRate+'</td>'+
       '<td>'+(z.daysOfSupply==null?'<span class="sub">∞</span>':z.daysOfSupply+" дн")+'</td>'+
       '<td>'+z.projLeftPct+'%</td>'+
+      '<td>'+discHtml(z.currentDiscount,z.recommendedDiscount)+'</td>'+
       '<td><span class="pill '+st[1]+'">'+st[0]+'</span></td>';
     ztb.appendChild(tr);
   });
@@ -272,7 +273,8 @@ function render(rep){
       det.className="sizedetail"; det.hidden=true;
       var chips=r.sizes.map(function(z){
         var cls=z.status==="stuck"?"stuck":(z.status==="empty"?"empty":"ok");
-        return '<span class="szchip '+cls+'"><b>'+z.size+'</b> '+fmt(z.stock)+' шт · '+z.dailyRate+'/д · ост '+z.projLeftPct+'%'+(z.status==="stuck"&&z.stock>0?' ⚠️':'')+'</span>';
+        var d=(z.recommendedDiscount!=null&&z.recommendedDiscount!==z.currentDiscount)?(' · скидка '+z.currentDiscount+'%→'+z.recommendedDiscount+'%'):(z.currentDiscount!=null?(' · скидка '+z.currentDiscount+'%'):'');
+        return '<span class="szchip '+cls+'"><b>'+z.size+'</b> '+fmt(z.stock)+' шт · '+z.dailyRate+'/д · ост '+z.projLeftPct+'%'+d+(z.status==="stuck"&&z.stock>0?' ⚠️':'')+'</span>';
       }).join("");
       det.innerHTML='<td colspan="10"><div class="szwrap">'+chips+'</div></td>';
       tb.appendChild(det);
@@ -314,7 +316,14 @@ function demoReport(p){
   var today=new Date(); var end=new Date(p.seasonEnd); var daysLeft=Math.max(1,Math.round((end-today)/864e5));
   var tgt=parseFloat(p.targetPct)/100; var rows=[], tot=0,sold=0,dead=0;
   var SZ=["S","M","L","XL"], szTot={};
-  function mkSizes(stock,daily){
+  function recDisc(sStock,sDaily,base){
+    if(sStock<=0) return base;
+    var req=sStock*(1-tgt)/daysLeft;
+    if(sDaily<=0) return Math.min(85,Math.max(base+30,40));
+    if(req>sDaily) return Math.min(85,Math.round(base+(req/sDaily-1)*100/2));
+    return base;
+  }
+  function mkSizes(stock,daily,cur){
     // распределяем остаток/продажи по размерам (XL «залёживается»)
     var w=[0.2,0.35,0.3,0.15], ws=[0.15,0.5,0.33,0.02], out=[];
     SZ.forEach(function(z,i){
@@ -323,7 +332,8 @@ function demoReport(p){
       var sDos=sDaily>0?Math.round(sStock/sDaily):null;
       var sStat=sStock<=0?"empty":(sDaily<=0?"stuck":"ok");
       out.push({size:z,stock:sStock,soldRecent:Math.round(sDaily*28),dailyRate:sDaily,daysOfSupply:sDos,
-        projLeftPct:sStock?Math.round(sProj/sStock*1000)/10:0,status:sStat});
+        projLeftPct:sStock?Math.round(sProj/sStock*1000)/10:0,status:sStat,
+        currentDiscount:cur,recommendedDiscount:recDisc(sStock,sDaily,cur)});
       szTot[z]=szTot[z]||{stock:0,recent:0,proj:0};
       szTot[z].stock+=sStock; szTot[z].recent+=Math.round(sDaily*28); szTot[z].proj+=sProj;
     });
@@ -341,7 +351,7 @@ function demoReport(p){
     rows.push({vendorCode:a[0],subject:a[1],size:"M",stock:stock,dailyRate:daily,trendPct:[ -12,8,24,0,-5][rows.length],
       daysOfSupply:dos,depletionDate:dos?new Date(today.getTime()+dos*864e5).toISOString():null,
       projLeft:proj,projLeftPct:stock?Math.round(proj/stock*1000)/10:0,requiredDaily:Math.round(req*100)/100,
-      deadstock:ds,currentDiscount:cur,recommendedDiscount:rec,status:status,sizes:mkSizes(stock,daily)});
+      deadstock:ds,currentDiscount:cur,recommendedDiscount:rec,status:status,sizes:mkSizes(stock,daily,cur)});
     tot+=stock; sold+=Math.round(daily*p.lookback||daily*28); dead+=ds;
   });
   var curDaily=rows.reduce(function(s,r){return s+r.dailyRate;},0);
@@ -358,7 +368,8 @@ function demoReport(p){
   });
   var sizeSum=SZ.map(function(z){var d=szTot[z]||{stock:0,recent:0,proj:0};var sd=Math.round(d.recent/28*100)/100;
     return {size:z,stock:d.stock,soldRecent:d.recent,dailyRate:sd,daysOfSupply:sd>0?Math.round(d.stock/sd):null,
-      projLeftPct:d.stock?Math.round(d.proj/d.stock*1000)/10:0,status:d.stock<=0?"empty":(sd<=0?"stuck":"ok")};});
+      projLeftPct:d.stock?Math.round(d.proj/d.stock*1000)/10:0,status:d.stock<=0?"empty":(sd<=0?"stuck":"ok"),
+      currentDiscount:13,recommendedDiscount:recDisc(d.stock,sd,13)};});
   return {title:"Шорты (демо)",seasonEnd:p.seasonEnd,daysLeft:daysLeft,lookbackDays:parseInt(p.lookback)||28,
     targetRemainPct:parseFloat(p.targetPct),generatedAt:"демо",
     summary:{totalStock:tot,soldRecent:sold,currentDaily:Math.round(curDaily*100)/100,trendPct:6.4,
