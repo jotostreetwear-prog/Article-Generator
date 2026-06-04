@@ -143,6 +143,14 @@ tr.sizedetail td{ background:var(--surface-2); padding:10px 14px; }
       <input id="lookback" type="number" min="3" max="180" step="1" value="28" style="width:90px">
     </div>
     <div class="fld">
+      <label for="periodStart" title="Если выбрать период — продажи считаются по нему, а «Окно, дней» игнорируется">Период с</label>
+      <input id="periodStart" type="date">
+    </div>
+    <div class="fld">
+      <label for="periodEnd">по</label>
+      <input id="periodEnd" type="date">
+    </div>
+    <div class="fld">
       <label for="costShare" title="Себестоимость как доля от обычной цены">Себест., %</label>
       <input id="costShare" type="number" min="0" max="95" step="1" value="35" style="width:90px">
     </div>
@@ -222,9 +230,12 @@ function discHtml(cur,rec){ if(rec===cur) return '<span class="disc">'+cur+'%</s
 var STATUS={ok:["В графике","ok"],accelerate:["Ускорить","accelerate"],stuck:["Стоит","stuck"],empty:["Нет остатка","empty"]};
 
 function params(){
-  return { category:$("category").value, seasonEnd:$("seasonEnd").value,
+  var p={ category:$("category").value, seasonEnd:$("seasonEnd").value,
     targetPct:$("targetPct").value, lookback:$("lookback").value,
     costSharePct:$("costShare").value, minMarginPct:$("minMargin").value };
+  var ps=$("periodStart").value, pe=$("periodEnd").value;
+  if(ps&&pe){ p.periodStart=ps; p.periodEnd=pe; }
+  return p;
 }
 
 function render(rep){
@@ -234,7 +245,7 @@ function render(rep){
   $("verdict").textContent = s.verdict;
   var trendCls = s.trendPct>0?"up":(s.trendPct<0?"down":"");
   $("kpis").innerHTML =
-    kpi("Остаток на складе", fmt(s.totalStock)+" шт", "продано за "+rep.lookbackDays+" дн: "+fmt(s.soldRecent)+" шт") +
+    kpi("Остаток на складе", fmt(s.totalStock)+" шт", "продано за "+rep.lookbackDays+" дн"+(rep.periodStart?(" · "+fmtDate(rep.periodStart)+"–"+fmtDate(rep.periodEnd)):"")+": "+fmt(s.soldRecent)+" шт") +
     kpi("Темп продаж", s.currentDaily+" шт/день", "динамика к пред. периоду", trendCls, trendHtml(s.trendPct)) +
     kpi("Хватит остатка", (s.daysOfSupply==null?"∞":s.daysOfSupply+" дн"), s.depletionDate?("обнулится "+fmtDate(s.depletionDate)):"при текущем темпе") +
     kpi("До конца сезона", rep.daysLeft+" дн", "до "+fmtDate(rep.seasonEnd)) +
@@ -324,6 +335,10 @@ function demoReport(p){
   var arts=[["J10001/black","Шорты",420,2.1,18],["J10002/grey","Шорты",260,0.4,5],
     ["J10003/navy","Шорты",150,3.6,30],["J10004/beige","Шорты",90,0.0,7],["J10005/olive","Шорты",310,1.2,20]];
   var today=new Date(); var end=new Date(p.seasonEnd); var daysLeft=Math.max(1,Math.round((end-today)/864e5));
+  var win=parseInt(p.lookback)||28, pStart, pEnd;
+  if(p.periodStart&&p.periodEnd){ pStart=p.periodStart; pEnd=p.periodEnd;
+    win=Math.max(1,Math.round((new Date(pEnd)-new Date(pStart))/864e5)); }
+  else { pEnd=today.toISOString().slice(0,10); pStart=new Date(today.getTime()-win*864e5).toISOString().slice(0,10); }
   var tgt=parseFloat(p.targetPct)/100; var rows=[], tot=0,sold=0,dead=0;
   var cs=Math.min(0.95,Math.max(0,(parseFloat(p.costSharePct)||35)/100));
   var mm=Math.max(0,(parseFloat(p.minMarginPct)||10)/100);
@@ -365,7 +380,7 @@ function demoReport(p){
       daysOfSupply:dos,depletionDate:dos?new Date(today.getTime()+dos*864e5).toISOString():null,
       projLeft:proj,projLeftPct:stock?Math.round(proj/stock*1000)/10:0,requiredDaily:Math.round(req*100)/100,
       deadstock:ds,currentDiscount:cur,recommendedDiscount:rec,status:status,sizes:mkSizes(stock,daily,cur)});
-    tot+=stock; sold+=Math.round(daily*p.lookback||daily*28); dead+=ds;
+    tot+=stock; sold+=Math.round(daily*win); dead+=ds;
   });
   var curDaily=rows.reduce(function(s,r){return s+r.dailyRate;},0);
   var proj=Math.max(0,Math.round(tot-curDaily*daysLeft));
@@ -384,8 +399,8 @@ function demoReport(p){
     return {size:z,stock:d.stock,soldRecent:d.recent,dailyRate:sd,daysOfSupply:sd>0?Math.round(d.stock/sd):null,
       projLeftPct:d.stock?Math.round(d.proj/d.stock*1000)/10:0,status:d.stock<=0?"empty":(sd<=0?"stuck":"ok"),
       currentDiscount:13,recommendedDiscount:recDisc(d.stock,sd,13)};});
-  return {title:"Шорты (демо)",seasonEnd:p.seasonEnd,daysLeft:daysLeft,lookbackDays:parseInt(p.lookback)||28,
-    targetRemainPct:parseFloat(p.targetPct),generatedAt:"демо",
+  return {title:"Шорты (демо)",seasonEnd:p.seasonEnd,daysLeft:daysLeft,lookbackDays:win,
+    periodStart:pStart,periodEnd:pEnd,targetRemainPct:parseFloat(p.targetPct),generatedAt:"демо",
     summary:{totalStock:tot,soldRecent:sold,currentDaily:Math.round(curDaily*100)/100,trendPct:6.4,
       daysOfSupply:Math.round(tot/curDaily),depletionDate:new Date(today.getTime()+tot/curDaily*864e5).toISOString(),
       requiredDaily:Math.round(req*100)/100,projLeft:proj,projLeftPct:Math.round(proj/tot*1000)/10,scenarios:scen,sizes:sizeSum,

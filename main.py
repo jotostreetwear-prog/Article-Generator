@@ -1295,7 +1295,8 @@ def _parse_wb_date(s):
 
 def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08-31",
                           target_remain_pct=10.0, lookback_days=28, elasticity=2.0,
-                          cost_share=None, min_margin=None):
+                          cost_share=None, min_margin=None,
+                          period_start=None, period_end=None):
     """
     Считает по сезонной категории:
       • остаток (quantityFull по всем складам),
@@ -1311,9 +1312,26 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     title = preset.get("title") or f"Категория J{category_code}"
 
     today = datetime.now().date()
-    win = max(1, int(lookback_days))
-    start_recent = today - timedelta(days=win)
-    start_prev = today - timedelta(days=2 * win)
+
+    def _as_date(v):
+        if not v:
+            return None
+        try:
+            return datetime.strptime(str(v)[:10], "%Y-%m-%d").date()
+        except Exception:
+            return None
+
+    # Окно анализа продаж: либо выбранный период (календарь), либо «последние N дней».
+    ps, pe = _as_date(period_start), _as_date(period_end)
+    if ps and pe and pe >= ps:
+        rec_start, rec_end = ps, pe
+        win = max(1, (rec_end - rec_start).days)
+    else:
+        rec_end = today
+        win = max(1, int(lookback_days))
+        rec_start = rec_end - timedelta(days=win)
+    start_recent = rec_start
+    start_prev = rec_start - timedelta(days=win)  # предыдущее окно той же длины — для динамики
 
     try:
         season_end_d = datetime.strptime(season_end, "%Y-%m-%d").date()
@@ -1363,6 +1381,8 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         d = _parse_wb_date(o.get("date"))
         if not d:
             continue
+        if d > rec_end:
+            continue  # за пределами выбранного периода
         nm = o.get("nmId")
         sz = _norm_size(o.get("techSize"))
         cat_size.setdefault(sz, {"recent": 0, "prev": 0, "stock": 0})
@@ -1611,6 +1631,8 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         "seasonEnd": season_end,
         "daysLeft": days_left,
         "lookbackDays": win,
+        "periodStart": rec_start.isoformat(),
+        "periodEnd": rec_end.isoformat(),
         "targetRemainPct": float(target_remain_pct),
         "elasticity": elasticity,
         "summary": {
@@ -1674,11 +1696,14 @@ def api_wb_season_report():
             min_margin = float(request.args.get("minMarginPct")) / 100.0
         except Exception:
             min_margin = None
+    period_start = (request.args.get("periodStart", "") or "").strip() or None
+    period_end = (request.args.get("periodEnd", "") or "").strip() or None
     try:
         report = build_seasonal_report(
             category_code=category, keywords=keywords, season_end=season_end,
             target_remain_pct=target_pct, lookback_days=lookback, elasticity=elasticity,
             cost_share=cost_share, min_margin=min_margin,
+            period_start=period_start, period_end=period_end,
         )
         return jsonify({"ok": True, "report": report})
     except Exception as e:
@@ -1707,7 +1732,9 @@ def build_seasonal_report_message(rep):
         f"📉 *Распродажа сезона — {rep['title']}*",
         f"Отчёт на {rep.get('generatedAt','')} · до конца сезона {rep['daysLeft']} дн (до {rep['seasonEnd']})",
         "",
-        f"📦 Остаток: *{s['totalStock']} шт* · продано за {rep['lookbackDays']} дн: {s['soldRecent']} шт",
+        f"📦 Остаток: *{s['totalStock']} шт* · продано за {rep['lookbackDays']} дн"
+        + (f" ({_fmt_date_ru(rep['periodStart'])}–{_fmt_date_ru(rep['periodEnd'])})" if rep.get('periodStart') else "")
+        + f": {s['soldRecent']} шт",
         f"⚡ Темп: *{s['currentDaily']} шт/день* (динамика {_trend_arrow(s['trendPct'])})",
         f"⏳ Хватит: {dos_txt}",
         f"🎯 Чтобы осталось ≤{int(rep['targetRemainPct'])}% ({s['targetLeftUnits']} шт) → нужно *{s['requiredDaily']} шт/день*",
@@ -1822,8 +1849,14 @@ def api_wb_season_report_send():
             lookback = int(data.get("lookback", 28))
         except Exception:
             lookback = 28
+        cost_share = (float(data["costSharePct"]) / 100.0) if data.get("costSharePct") not in (None, "") else None
+        min_margin = (float(data["minMarginPct"]) / 100.0) if data.get("minMarginPct") not in (None, "") else None
+        period_start = (data.get("periodStart") or "").strip() or None
+        period_end = (data.get("periodEnd") or "").strip() or None
         rep = build_seasonal_report(category_code=category, season_end=season_end,
-                                    target_remain_pct=target_pct, lookback_days=lookback)
+                                    target_remain_pct=target_pct, lookback_days=lookback,
+                                    cost_share=cost_share, min_margin=min_margin,
+                                    period_start=period_start, period_end=period_end)
         send_b24_message(dialog, build_seasonal_report_message(rep))
         return jsonify({"ok": True, "dialog": dialog, "count": rep.get("count", 0)})
     except Exception as e:
