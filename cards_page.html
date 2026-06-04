@@ -46,6 +46,7 @@ body{background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-
 .block h2{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);margin:0 0 14px}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
 .field{display:flex;flex-direction:column;gap:7px;flex:1;min-width:170px}
+.field[hidden]{display:none}
 .field.grow2{flex:2}
 .label{font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:700;color:var(--ink-2)}
 input[type=text],input[type=number],select,textarea{width:100%;font-family:var(--sans);font-size:15px;color:var(--ink);
@@ -142,26 +143,11 @@ td textarea{min-height:40px}
     </div>
 
     <div class="block" id="editFields" hidden>
-      <h2>2 · Что менять</h2>
+      <h2>2 · Что меняем</h2>
       <div class="row">
-        <div class="field">
-          <label class="label" for="fieldSel">Поле</label>
-          <select id="fieldSel">
-            <option value="description">SEO-описание</option>
-            <option value="title">Название</option>
-            <option value="brand">Бренд</option>
-            <option value="vendorCode">Артикул (vendorCode)</option>
-            <option value="subjectID">Категория</option>
-            <option value="characteristic">Характеристика</option>
-          </select>
-        </div>
-        <div class="field" id="charcPickWrap" hidden>
-          <label class="label" for="charcSel">Характеристика</label>
-          <select id="charcSel"></select>
-        </div>
-        <div class="field" id="subjPickWrap" hidden>
-          <label class="label" for="subjSel">Новая категория</label>
-          <select id="subjSel"><option value="">— загрузка —</option></select>
+        <div class="field grow2">
+          <label class="label" for="fieldSel">Что меняем</label>
+          <select id="fieldSel"><option value="">— загрузка списка —</option></select>
         </div>
       </div>
 
@@ -170,7 +156,11 @@ td textarea{min-height:40px}
           <label class="label" for="valText">Новое значение</label>
           <textarea id="valText" placeholder="Введите новое значение для всех выбранных карточек"></textarea>
         </div>
-        <div class="field" id="valLineWrap" hidden>
+        <div class="field grow2" id="valCatWrap" hidden>
+          <label class="label" for="subjSel">Новая категория</label>
+          <select id="subjSel"><option value="">— загрузка —</option></select>
+        </div>
+        <div class="field grow2" id="valLineWrap" hidden>
           <label class="label" for="valLine">Новое значение</label>
           <input id="valLine" type="text" autocomplete="off">
         </div>
@@ -335,6 +325,7 @@ $("loadBtn").addEventListener("click",async function(){
     $("pickerWrap").hidden=false;
     $("editFields").hidden=(ALL_CARDS.length===0);
     if(ALL_CARDS.length===0) alert("Карточки не найдены");
+    else buildChangeOptions();
   }catch(e){ alert("Не удалось связаться с сервером"); }
   finally{ spinOn($("loadBtn"),false,"Загрузить карточки с WB"); fit(); }
 });
@@ -377,33 +368,20 @@ $("selNone").addEventListener("click",function(){
   selected.clear(); updateSelCount();
 });
 
-/* выбор поля «что менять» */
+/* единый список «что меняем»: основные поля + цена + все характеристики */
 var fieldSel=$("fieldSel");
+var CHARC_NAMES={};   // id -> название характеристики
 fieldSel.addEventListener("change",updateFieldUI);
-function updateFieldUI(){
-  var f=fieldSel.value;
-  var bigText=(f==="description");
-  $("valTextWrap").hidden=!bigText;
-  $("valLineWrap").hidden=(bigText||f==="subjectID");
-  $("charcPickWrap").hidden=(f!=="characteristic");
-  $("subjPickWrap").hidden=(f!=="subjectID");
-  var note="";
-  if(f==="vendorCode") note="⚠ Это поле уникально для каждой карточки — применяйте к одной карточке за раз.";
-  if(f==="subjectID") note="⚠ Wildberries не всегда разрешает смену категории у существующей карточки — при отказе WB вернёт ошибку.";
-  if(f==="characteristic") note="Список характеристик собран из выбранных карточек. Несколько значений вводите через запятую.";
-  $("editNote").textContent=note;
-  if(f==="characteristic") fillCharcSelect();
-  if(f==="subjectID") loadSubjectsInto($("subjSel"));
+
+async function buildChangeOptions(){
+  var base=[["description","SEO-описание"],["title","Название"],["vendorCode","Артикул"],
+            ["subjectID","Категория"],["brand","Бренд"],["price","Цена, ₽"]];
+  var baseHtml='<optgroup label="Основные">'+base.map(function(b){
+    return '<option value="'+b[0]+'">'+b[1]+'</option>';}).join("")+'</optgroup>';
+  fieldSel.innerHTML=baseHtml+'<optgroup label="Характеристики"><option value="" disabled>— загрузка характеристик… —</option></optgroup>';
   fit();
-}
-async function fillCharcSelect(){
-  var sel=$("charcSel");
-  sel.innerHTML='<option value="">— загрузка характеристик… —</option>';
-  fit();
-  var map={};        // id -> название
-  var required={};   // id -> обязательная ли
-  var subjects={};
-  selectedCards().forEach(function(c){
+  var map={},required={},subjects={};
+  ALL_CARDS.forEach(function(c){
     (c.characteristics||[]).forEach(function(ch){ if(ch.id!=null) map[ch.id]=ch.name; });
     if(c.subjectID!=null) subjects[c.subjectID]=true;
   });
@@ -416,16 +394,34 @@ async function fillCharcSelect(){
       }); }
     }catch(e){}
   }
-  var keys=Object.keys(map);
-  if(keys.length===0){ sel.innerHTML='<option value="">— характеристики не найдены —</option>'; fit(); return; }
-  keys.sort(function(a,b){
+  CHARC_NAMES=map;
+  var keys=Object.keys(map).sort(function(a,b){
     var ra=required[a]?0:1, rb=required[b]?0:1;
     if(ra!==rb) return ra-rb;
     return String(map[a]).localeCompare(String(map[b]));
   });
-  sel.innerHTML=keys.map(function(id){
-    return '<option value="'+id+'">'+esc(map[id])+(required[id]?" (обязательная)":"")+'</option>';
-  }).join("");
+  var chOpts = keys.length
+    ? keys.map(function(id){ return '<option value="charc:'+id+'">'+esc(map[id])+(required[id]?" *":"")+'</option>'; }).join("")
+    : '<option value="" disabled>— нет (выберите карточки одной категории) —</option>';
+  fieldSel.innerHTML=baseHtml+'<optgroup label="Характеристики">'+chOpts+'</optgroup>';
+  updateFieldUI();
+  fit();
+}
+
+function updateFieldUI(){
+  var v=fieldSel.value, isCharc=(v.indexOf("charc:")===0);
+  var f=isCharc?"characteristic":v;
+  $("valTextWrap").hidden=(f!=="description");
+  $("valCatWrap").hidden=(f!=="subjectID");
+  $("valLineWrap").hidden=(f==="description"||f==="subjectID"||f==="");
+  var note="";
+  if(f==="vendorCode") note="⚠ Артикул уникален для каждой карточки — применяйте к одной карточке за раз.";
+  else if(f==="subjectID") note="⚠ Wildberries не всегда разрешает смену категории у существующей карточки.";
+  else if(f==="price") note="Цена меняется через API цен WB (нужен доступ «Цены и скидки»). Укажите новую цену в рублях.";
+  else if(isCharc) note="Несколько значений вводите через запятую.";
+  $("editNote").textContent=note;
+  $("valLine").placeholder=(f==="price")?"например 2990":"новое значение";
+  if(f==="subjectID") loadSubjectsInto($("subjSel"));
   fit();
 }
 
@@ -443,27 +439,39 @@ async function loadSubjectsInto(sel,name){
 
 function selectedCards(){ return ALL_CARDS.filter(function(c){return selected.has(c.nmID);}); }
 
-var FIELD_LABELS={description:"SEO-описание",title:"Название",brand:"Бренд",vendorCode:"Артикул",subjectID:"Категория",characteristic:"Характеристика"};
+var FIELD_LABELS={description:"SEO-описание",title:"Название",brand:"Бренд",vendorCode:"Артикул",subjectID:"Категория",characteristic:"Характеристика",price:"Цена, ₽"};
 function truncate(s){ s=String(s==null?"":s); return s.length>44?s.slice(0,44)+"…":s; }
 function findCharc(card,id){ var a=card.characteristics||[]; for(var i=0;i<a.length;i++){ if(a[i].id===id) return a[i]; } return null; }
 
 function buildEditPayload(){
   var cards=selectedCards();
   if(cards.length===0){ showStatus($("editStatus"),false,"Не выбрано ни одной карточки"); return null; }
-  var f=fieldSel.value;
-  var value=(f==="description")?$("valText").value:$("valLine").value;
-  var charcId=null,charcName=null;
-  if(f==="characteristic"){
-    charcId=parseInt($("charcSel").value,10);
-    charcName=$("charcSel").selectedOptions[0]?$("charcSel").selectedOptions[0].textContent:null;
-    if(charcName) charcName=charcName.replace(/\s*\(обязательная\)\s*$/,"");
-    if(!charcId){ showStatus($("editStatus"),false,"Выберите характеристику"); return null; }
+  var v=fieldSel.value;
+  if(!v){ showStatus($("editStatus"),false,"Выберите, что меняем"); return null; }
+  var isCharc=(v.indexOf("charc:")===0);
+  var f=isCharc?"characteristic":v;
+  var charcId=null,charcName=null,value,label;
+  if(isCharc){
+    charcId=parseInt(v.slice(6),10);
+    charcName=(CHARC_NAMES[charcId]||"").replace(/\s*\*$/,"");
     value=$("valLine").value.split(",").map(function(s){return s.trim();}).filter(Boolean);
     if(value.length===0){ showStatus($("editStatus"),false,"Введите значение характеристики"); return null; }
+    label="Характеристика: "+charcName;
+  } else if(f==="subjectID"){
+    value=$("subjSel").value;
+    if(!value){ showStatus($("editStatus"),false,"Выберите категорию"); return null; }
+    label="Категория";
+  } else if(f==="description"){
+    value=$("valText").value;
+    if(!value){ showStatus($("editStatus"),false,"Введите новое значение"); return null; }
+    label="SEO-описание";
+  } else {
+    value=$("valLine").value;
+    if(value===""||value==null){ showStatus($("editStatus"),false,"Введите новое значение"); return null; }
+    if(f==="price" && isNaN(parseFloat(value))){ showStatus($("editStatus"),false,"Цена должна быть числом"); return null; }
+    label=FIELD_LABELS[f]||f;
   }
-  if(f==="subjectID"){ value=$("subjSel").value; if(!value){ showStatus($("editStatus"),false,"Выберите категорию"); return null; } }
-  if(f!=="characteristic" && f!=="subjectID" && (value===""||value==null)){ showStatus($("editStatus"),false,"Введите новое значение"); return null; }
-  return { cards:cards, field:f, value:value, charcId:charcId, charcName:charcName, label:FIELD_LABELS[f]||f };
+  return { cards:cards, field:f, value:value, charcId:charcId, charcName:charcName, label:label };
 }
 
 function previewText(p){
@@ -474,6 +482,7 @@ function previewText(p){
     var oldv;
     if(f==="characteristic"){ var ch=findCharc(c,p.charcId); oldv=ch?(ch.value||[]).join(", "):"—"; }
     else if(f==="subjectID"){ oldv=c.subjectName||"—"; }
+    else if(f==="price"){ oldv="текущая"; }
     else { oldv=c[f]; }
     lines.push(c.vendorCode+":  "+truncate(oldv||"—")+"  →  "+truncate(newv));
   });
@@ -498,12 +507,20 @@ $("confirmCancel").addEventListener("click",function(){ $("confirmBox").style.di
 $("confirmApply").addEventListener("click",async function(){
   if(!pendingPayload) return;
   var p=pendingPayload;
-  var body={ cards:p.cards.map(function(c){return c.raw;}), field:p.field, value:p.value, charcId:p.charcId, charcName:p.charcName };
   spinOn($("confirmApply"),true,"Сохраняю на WB…");
   try{
-    var j=await api("/api/wb/bulk-edit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    if(j.ok){ showStatus($("editStatus"),true,"Обновлено карточек: "+j.updated+". Изменения отправлены на Wildberries."); $("confirmBox").style.display="none"; pendingPayload=null; }
-    else showStatus($("editStatus"),false,j.error||"Ошибка обновления");
+    var j;
+    if(p.field==="price"){
+      var items=p.cards.map(function(c){return {nmID:c.nmID, price:parseFloat(p.value)};});
+      j=await api("/api/wb/set-prices",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({items:items})});
+      if(j.ok){ showStatus($("editStatus"),true,"Цена отправлена на WB для "+items.length+" карточк(и). Обновление может занять несколько минут."); $("confirmBox").style.display="none"; pendingPayload=null; }
+      else showStatus($("editStatus"),false,j.error||"Ошибка изменения цены");
+    } else {
+      var body={ cards:p.cards.map(function(c){return c.raw;}), field:p.field, value:p.value, charcId:p.charcId, charcName:p.charcName };
+      j=await api("/api/wb/bulk-edit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+      if(j.ok){ showStatus($("editStatus"),true,"Обновлено карточек: "+j.updated+". Изменения отправлены на Wildberries."); $("confirmBox").style.display="none"; pendingPayload=null; }
+      else showStatus($("editStatus"),false,j.error||"Ошибка обновления");
+    }
   }catch(e){ showStatus($("editStatus"),false,"Не удалось связаться с сервером"); }
   finally{ spinOn($("confirmApply"),false,"Подтвердить — отправить на WB"); fit(); }
 });
