@@ -23,6 +23,9 @@ BITRIX_CLIENT_ID = os.environ.get("BITRIX_CLIENT_ID", "").strip()
 BITRIX_CLIENT_SECRET = os.environ.get("BITRIX_CLIENT_SECRET", "").strip()
 BITRIX_APP_TOKEN = os.environ.get("BITRIX_APP_TOKEN", "").strip()
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+# Домен портала Битрикс24 для REST-вызовов. Нужен как запасной, если в OAuth
+# случайно сохранился oauth.bitrix.info (его Битрикс возвращает в ответе refresh).
+BITRIX_PORTAL_DOMAIN = os.environ.get("BITRIX_PORTAL_DOMAIN", "joto.bitrix24.ru").strip()
 
 # Кому слать отчёт по задачам и алерты CTR
 REPORT_USER_ID = os.environ.get("REPORT_USER_ID", "226").strip()
@@ -377,6 +380,20 @@ def set_bot_id(bot_id):
     except Exception as e:
         print(f"Ошибка set_bot_id: {e}")
 
+def normalize_domain(domain):
+    """Возвращает домен портала для REST. oauth.bitrix.info — это OAuth-сервер,
+    а не портал: REST-методы там не живут (404 ERROR_METHOD_NOT_FOUND).
+    В таком случае подставляем реальный портал."""
+    d = (domain or "").strip().strip("/")
+    if not d or "oauth.bitrix" in d:
+        return BITRIX_PORTAL_DOMAIN
+    return d
+
+def _domain_from_endpoint(url):
+    """Достаёт хост портала из client_endpoint вида https://joto.bitrix24.ru/rest/."""
+    m = re.match(r"https?://([^/]+)", url or "")
+    return m.group(1) if m else ""
+
 def get_access_token():
     st = load_oauth()
     if not st:
@@ -388,7 +405,7 @@ def get_access_token():
     if not access or not domain:
         return None
     if time.time() < exp:
-        return access, domain
+        return access, normalize_domain(domain)
     if not refresh or not BITRIX_CLIENT_ID or not BITRIX_CLIENT_SECRET:
         print("[OAUTH] access_token истёк, refresh невозможен (нет refresh/CLIENT_ID/SECRET)")
         return None
@@ -411,11 +428,12 @@ def get_access_token():
     na = data.get("access_token")
     nr = data.get("refresh_token") or refresh
     ein = int(data.get("expires_in") or 3600)
-    nd = data.get("domain") or domain
+    # Реальный портал берём из client_endpoint, а не из data["domain"] (=oauth.bitrix.info)
+    nd = normalize_domain(_domain_from_endpoint(data.get("client_endpoint")) or domain)
     if not na:
         return None
     save_oauth(na, nr, ein, nd, st.get("member_id"))
-    print("[OAUTH] access_token обновлён через refresh")
+    print(f"[OAUTH] access_token обновлён через refresh (домен {nd})")
     return na, nd
 
 # ===================== BITRIX REST =====================
@@ -429,6 +447,7 @@ def bx_call(method, params=None, auth=None):
         if not tok:
             raise RuntimeError("Bitrix OAuth не настроен — приложение не установлено?")
         token, domain = tok
+    domain = normalize_domain(domain)
     if BITRIX_CLIENT_ID:
         body.setdefault("CLIENT_ID", BITRIX_CLIENT_ID)
     url = f"https://{domain}/rest/{method}?auth={token}"
