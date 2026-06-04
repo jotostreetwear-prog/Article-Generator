@@ -973,6 +973,7 @@ def api_article():
 # Требуется WB_API_TOKEN с доступом к категории «Контент».
 
 WB_CONTENT_BASE = "https://content-api.wildberries.ru"
+WB_PRICES_BASE = "https://discounts-prices-api.wildberries.ru"  # API цен и скидок (отдельная категория токена)
 WB_CARDS_PAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cards_page.html")
 
 def wb_content_request(method, path, json_body=None, params=None, timeout=60):
@@ -1166,6 +1167,45 @@ def api_wb_bulk_edit():
             msg = "; ".join(str(e.get("errorText") or e.get("additionalErrors") or "ошибка WB") for e in errors)
             return jsonify({"ok": False, "error": msg, "details": errors}), 502
         return jsonify({"ok": True, "updated": len(cards)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+@app.route("/api/wb/set-prices", methods=["POST"])
+def api_wb_set_prices():
+    """Массовое изменение цены через API цен WB (нужна категория токена «Цены и скидки»).
+    items: [{nmID, price}] — price в рублях (целое)."""
+    if not WB_API_TOKEN:
+        return jsonify({"ok": False, "error": "WB_API_TOKEN не задан"}), 400
+    data = request.get_json(silent=True) or {}
+    items = data.get("items") or []
+    payload = []
+    for it in items:
+        try:
+            nm = int(it.get("nmID"))
+            price = int(round(float(it.get("price"))))
+        except (TypeError, ValueError):
+            continue
+        if nm and price > 0:
+            payload.append({"nmID": nm, "price": price})
+    if not payload:
+        return jsonify({"ok": False, "error": "Нет корректных пар nmID/цена"}), 400
+    try:
+        r = httpx.post(WB_PRICES_BASE + "/api/v2/upload/task",
+                       headers={"Authorization": WB_API_TOKEN},
+                       json={"data": payload}, timeout=60)
+        if r.status_code >= 400:
+            try:
+                detail = r.json()
+            except Exception:
+                detail = r.text[:400]
+            err = detail.get("errorText") if isinstance(detail, dict) else detail
+            if r.status_code in (401, 403):
+                err = "Нет доступа к API цен — у токена нужна категория «Цены и скидки». " + str(err or "")
+            return jsonify({"ok": False, "error": f"WB цены {r.status_code}: {err}"}), 502
+        body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+        if isinstance(body, dict) and body.get("error"):
+            return jsonify({"ok": False, "error": body.get("errorText") or "Ошибка WB цен"}), 502
+        return jsonify({"ok": True, "updated": len(payload)})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
