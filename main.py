@@ -56,7 +56,7 @@ BOT_NAME = "Article Generator"
 BOT_CODE = "joto_article_bot"
 
 EVENT_HANDLER_URL = f"{PUBLIC_BASE_URL}/bitrix/events" if PUBLIC_BASE_URL else ""
-# Пункт левого меню Bitrix24 → открывает раздел массовых карточек WB
+# Пункты левого меню Bitrix24 — каждый раздел отдельным пунктом
 LEFT_MENU_HANDLER_URL = f"{PUBLIC_BASE_URL}/cards" if PUBLIC_BASE_URL else ""
 LEFT_MENU_TITLE = "Карточки WB"
 # Отдельный пункт левого меню → раздел распродажи сезона (отчёт по шортам)
