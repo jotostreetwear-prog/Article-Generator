@@ -1303,6 +1303,42 @@ def fetch_wb_stocks():
     """Актуальный срез остатков по всем складам."""
     return wb_stats_request("/api/v1/supplier/stocks", params={"dateFrom": "2020-01-01"})
 
+WB_PRICES_BASE = "https://discounts-prices-api.wildberries.ru"
+
+def fetch_wb_prices():
+    """Цены и скидки по номенклатурам из WB Prices API.
+    Возвращает {nmId: {'price': базовая_цена, 'discount': %, 'discounted': цена_со_скидкой}}.
+    Источник надёжнее, чем поле Price в остатках (его WB отдаёт не всегда).
+    Тихо возвращает {} если у токена нет доступа к категории «Цены и скидки»."""
+    if not WB_API_TOKEN:
+        return {}
+    out = {}
+    offset, limit = 0, 1000
+    try:
+        for _ in range(50):  # до 50 000 номенклатур
+            r = httpx.get(WB_PRICES_BASE + "/api/v2/list/goods/filter",
+                          headers={"Authorization": WB_API_TOKEN},
+                          params={"limit": limit, "offset": offset}, timeout=60)
+            if r.status_code >= 400:
+                break
+            goods = (((r.json() or {}).get("data") or {}).get("listGoods")) or []
+            if not goods:
+                break
+            for g in goods:
+                nm = g.get("nmID")
+                disc = g.get("discount") or 0
+                sizes = g.get("sizes") or []
+                price = next((s.get("price") for s in sizes if s.get("price")), None)
+                discounted = next((s.get("discountedPrice") for s in sizes if s.get("discountedPrice")), None)
+                if nm is not None and price:
+                    out[nm] = {"price": price, "discount": disc, "discounted": discounted}
+            if len(goods) < limit:
+                break
+            offset += limit
+    except Exception:
+        return out
+    return out
+
 def fetch_wb_orders(date_from):
     """Все заказы с указанной даты, с пагинацией по lastChangeDate (flag=0).
 
@@ -1427,6 +1463,7 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
 
     orders = fetch_wb_orders(start_prev.strftime("%Y-%m-%d"))
     stocks = fetch_wb_stocks()
+    prices = fetch_wb_prices()   # цены/скидки по nmId (надёжнее поля Price в остатках)
 
     def _norm_size(v):
         sz = str(v or "").strip()
@@ -1524,7 +1561,10 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         required_daily = need_sell / days_left
         deadstock = max(0.0, round(proj_left - target_left_units))  # сверх плана ляжет в неликвид
 
-        cur_disc = meta.get("discount") or 0
+        # цена/скидка: приоритет — WB Prices API, фолбэк — поля из остатков
+        pinfo = prices.get(nm) or {}
+        base_price = pinfo.get("price") or meta.get("price") or 0
+        cur_disc = pinfo.get("discount") if pinfo.get("discount") is not None else (meta.get("discount") or 0)
         rec_disc = cur_disc
         status = "ok"
         if stock <= 0:
@@ -1540,10 +1580,10 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         else:
             status = "ok"  # текущего темпа хватает
 
-        # Цены в рублях: текущая и рекомендованная (после скидки от базовой цены WB)
-        base_price = meta.get("price") or 0
-        cur_price = int(round(base_price * (1 - int(cur_disc) / 100.0))) if base_price else None
+        # Цены в рублях: текущая (со скидкой), рекомендованная и минимальная (предел по марже)
+        cur_price = pinfo.get("discounted") or (int(round(base_price * (1 - int(cur_disc) / 100.0))) if base_price else None)
         rec_price = int(round(base_price * (1 - int(rec_disc) / 100.0))) if base_price else None
+        min_price = int(round(base_price * (1 - max_disc / 100.0))) if base_price else None
 
         # разбивка по размерам внутри артикула
         size_rows = []
@@ -1572,6 +1612,7 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
                 "currentDiscount": int(cur_disc),
                 "recommendedDiscount": s_rec_disc,
                 "currentPrice": cur_price, "recommendedPrice": s_rec_price,
+                "minPrice": min_price,
             })
         size_rows.sort(key=lambda x: x["stock"], reverse=True)
 
@@ -1597,6 +1638,7 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
             "recommendedDiscount": int(rec_disc),
             "currentPrice": cur_price,
             "recommendedPrice": rec_price,
+            "minPrice": min_price,
             "status": status,
             "sizes": size_rows,
         })
@@ -1648,8 +1690,10 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         sw = sum(r["stock"] for r in priced) or 1
         avg_cur_price = int(round(sum(r["currentPrice"] * r["stock"] for r in priced) / sw))
         avg_rec_price = int(round(sum((r.get("recommendedPrice") or r["currentPrice"]) * r["stock"] for r in priced) / sw))
+        _minp = [r["minPrice"] for r in priced if r.get("minPrice")]
+        avg_min_price = int(round(sum(_minp) / len(_minp))) if _minp else None
     else:
-        avg_cur_price = avg_rec_price = None
+        avg_cur_price = avg_rec_price = avg_min_price = None
 
     target_basis = "начального остатка" if total_initial is not None else "текущего остатка"
     if total_stock == 0:
@@ -1725,6 +1769,10 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         s_status = "empty" if st <= 0 else ("stuck" if s_daily <= 0 else "ok")
         s_init = cat_initial_size.get(sz)
         s_target = (s_init if s_init is not None else st) * target_frac
+        s_rec_d = _rec_disc_for(st, s_daily, avg_disc, s_target)
+        # средняя базовая цена по категории (из текущей цены и средней скидки)
+        avg_base = (avg_cur_price / (1 - avg_disc / 100.0)) if (avg_cur_price and avg_disc < 100) else None
+        z_rec_price = int(round(avg_base * (1 - s_rec_d / 100.0))) if avg_base else None
         size_summary.append({
             "size": sz, "stock": int(st), "soldRecent": rc,
             "initialStock": int(s_init) if s_init is not None else None,
@@ -1732,7 +1780,9 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
             "dailyRate": round(s_daily, 2), "daysOfSupply": s_dos,
             "projLeftPct": s_pct, "status": s_status,
             "currentDiscount": int(round(avg_disc)),
-            "recommendedDiscount": _rec_disc_for(st, s_daily, avg_disc, s_target),
+            "recommendedDiscount": s_rec_d,
+            "currentPrice": avg_cur_price, "recommendedPrice": z_rec_price,
+            "minPrice": avg_min_price,
         })
     size_summary.sort(key=lambda x: _size_key(x["size"]))
 
@@ -1767,6 +1817,8 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
             "recommendedDiscount": rec_disc_total,
             "currentPrice": avg_cur_price,
             "recommendedPrice": avg_rec_price,
+            "minPrice": avg_min_price,
+            "pricesAvailable": bool(prices) or avg_cur_price is not None,
             "maxDiscountByMargin": max_disc,
             "marginLimited": margin_limited,
             "costSharePct": int(round(cs * 100)),
@@ -1863,7 +1915,8 @@ def build_seasonal_report_message(rep):
         f"({s['targetLeftUnits']} шт) → распродать *{s.get('needSell','—')} шт*, темп *{s['requiredDaily']} шт/день*",
         f"🧊 В неликвид при текущем темпе: *~{s['deadstock']} шт* (останется {s['projLeftPct']}%)",
         f"🏷 Скидка: сейчас ~{s['currentDiscount']}% → рекомендуем *{s['recommendedDiscount']}%*"
-        + (f" · цена ~{s['currentPrice']}₽ → *~{s['recommendedPrice']}₽*" if s.get("currentPrice") else ""),
+        + (f" · цена ~{s['currentPrice']}₽ → *~{s['recommendedPrice']}₽*"
+           + (f" (мин {s['minPrice']}₽)" if s.get("minPrice") else "") if s.get("currentPrice") else ""),
         f"💰 Маржа: макс скидка *{s.get('maxDiscountByMargin','—')}%* "
         f"(себест. {s.get('costSharePct','?')}% · мин. маржа {s.get('minMarginPct','?')}%)"
         + ("  ⚠️ упёрлись в маржу" if s.get("marginLimited") else ""),
