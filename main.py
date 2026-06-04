@@ -1230,17 +1230,57 @@ SEASONAL_PRESETS = {
 # Справочник фактических начальных остатков (приходы с производств), data/initial_stock.json.
 INITIAL_STOCK_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "initial_stock.json")
 
+# Перевод цветов RU→EN: накладные на русском, артикулы WB могут быть на латинице.
+COLOR_RU_EN = {
+    "черный": "black", "чёрный": "black", "белый": "white", "серый": "grey",
+    "серый меланж": "grey melange", "меланж": "melange", "темно-серый": "dark grey",
+    "тёмно-серый": "dark grey", "светло-серый": "light grey", "голубой": "blue",
+    "светло-голубой": "light blue", "синий": "blue", "темно-синий": "navy",
+    "тёмно-синий": "navy", "зеленый": "green", "зелёный": "green", "хаки": "khaki",
+    "бежевый": "beige", "коричневый": "brown", "красный": "red", "бордовый": "burgundy",
+    "розовый": "pink", "желтый": "yellow", "жёлтый": "yellow", "оранжевый": "orange",
+    "фиолетовый": "purple", "оливковый": "olive", "молочный": "milk", "кремовый": "cream",
+    "песочный": "sand", "графит": "graphite", "мятный": "mint", "бирюзовый": "turquoise",
+}
+COLOR_EN_RU = {en: ru for ru, en in COLOR_RU_EN.items()}
+
 def _norm_vendor(v):
     """Нормализуем артикул/цвет для сопоставления (регистр, пробелы)."""
     return re.sub(r"\s+", " ", str(v or "").strip()).lower()
 
+def _vendor_variants(vendor):
+    """Все варианты ключа артикула для сопоставления: как есть + перевод цвета RU↔EN."""
+    v = _norm_vendor(vendor)
+    variants = {v}
+    if "/" in v:
+        base, color = v.split("/", 1)
+        base, color = base.strip(), color.strip()
+        if color in COLOR_RU_EN:
+            variants.add(f"{base}/{COLOR_RU_EN[color]}")
+        if color in COLOR_EN_RU:
+            variants.add(f"{base}/{COLOR_EN_RU[color]}")
+    return variants
+
 def load_initial_stock():
-    """{нормализованный vendorCode -> {'total':int, 'sizes':{size:int}, ...}}; {} если файла нет."""
+    """Возвращает lookup {ключ -> item}, где ключи включают перевод цвета RU↔EN.
+    item = {'vendorCode', 'total', 'sizes', ...}. {} если файла нет."""
     try:
         with open(INITIAL_STOCK_PATH, encoding="utf-8") as fh:
-            return (json.load(fh) or {}).get("items", {})
+            items = (json.load(fh) or {}).get("items", {})
     except Exception:
         return {}
+    lookup = {}
+    for key, item in items.items():
+        for k in _vendor_variants(item.get("vendorCode") or key):
+            lookup.setdefault(k, item)
+    return lookup
+
+def lookup_initial(initial_stock, vendor):
+    """Ищет начальный остаток по артикулу, перебирая варианты перевода цвета."""
+    for k in _vendor_variants(vendor):
+        if k in initial_stock:
+            return initial_stock[k]
+    return {}
 
 def wb_stats_request(path, params=None, timeout=120):
     if not WB_API_TOKEN:
@@ -1370,15 +1410,16 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     mm = max(mm, 0.0)
     max_disc = min(85, max(0, int(round((1 - cs * (1 + mm)) * 100))))
 
-    def _rec_disc_for(s_stock, s_daily, base_disc):
-        """Рекомендуемая скидка под конкретный остаток/темп, чтобы успеть к цели,
-        но не глубже максимума по марже (max_disc)."""
+    def _rec_disc_for(s_stock, s_daily, base_disc, target_units):
+        """Рекомендуемая скидка под остаток/темп, чтобы к концу сезона осталось
+        не больше target_units штук, но не глубже максимума по марже (max_disc).
+        target_units — целевой остаток в штуках (10% от начального остатка)."""
         base = int(round(base_disc or 0))
         if s_stock <= 0:
             return min(max_disc, base) if base > max_disc else base
         if s_daily <= 0:                                  # стоит без продаж — агрессивно
             return min(max_disc, max(base + 30, 40))
-        s_req = s_stock * (1 - target_frac) / days_left
+        s_req = max(0.0, s_stock - target_units) / days_left
         if s_req > s_daily:                               # не успеваем — поднять скидку
             up = (s_req / s_daily - 1) * 100.0
             return min(max_disc, int(round(base + up / elasticity)))
@@ -1466,9 +1507,21 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         proj_left = max(0.0, stock - proj_sales)
         proj_left_pct = round(proj_left / stock * 100, 1) if stock > 0 else 0.0
 
-        need_sell = max(0.0, stock * (1 - target_frac))
+        # фактический начальный остаток по этому артикулу (из приходов), с переводом цвета
+        init_item = lookup_initial(initial_stock, meta.get("vendorCode"))
+        init_total = init_item.get("total")
+        init_sizes = init_item.get("sizes", {}) or {}
+        if init_item:
+            has_initial = True
+        # продано/ушло со склада с момента прихода = начальный − текущий (≥0)
+        sold_since = max(0, int(init_total) - int(stock)) if init_total is not None else None
+
+        # Цель «оставить ≤target%» считаем от ФАКТИЧЕСКОГО НАЧАЛЬНОГО остатка (если он есть),
+        # иначе — от текущего остатка.
+        base_for_target = init_total if init_total is not None else stock
+        target_left_units = base_for_target * target_frac
+        need_sell = max(0.0, stock - target_left_units)
         required_daily = need_sell / days_left
-        target_left_units = stock * target_frac
         deadstock = max(0.0, round(proj_left - target_left_units))  # сверх плана ляжет в неликвид
 
         cur_disc = meta.get("discount") or 0
@@ -1487,14 +1540,10 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         else:
             status = "ok"  # текущего темпа хватает
 
-        # фактический начальный остаток по этому артикулу (из приходов)
-        init_item = initial_stock.get(_norm_vendor(meta.get("vendorCode"))) or {}
-        init_total = init_item.get("total")
-        init_sizes = init_item.get("sizes", {}) or {}
-        if init_item:
-            has_initial = True
-        # продано/ушло со склада с момента прихода = начальный − текущий (≥0)
-        sold_since = max(0, int(init_total) - int(stock)) if init_total is not None else None
+        # Цены в рублях: текущая и рекомендованная (после скидки от базовой цены WB)
+        base_price = meta.get("price") or 0
+        cur_price = int(round(base_price * (1 - int(cur_disc) / 100.0))) if base_price else None
+        rec_price = int(round(base_price * (1 - int(rec_disc) / 100.0))) if base_price else None
 
         # разбивка по размерам внутри артикула
         size_rows = []
@@ -1510,6 +1559,10 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
             s_proj_left = max(0.0, s_stock - s_daily * days_left)
             s_pct = round(s_proj_left / s_stock * 100, 1) if s_stock > 0 else 0.0
             s_status = "empty" if s_stock <= 0 else ("stuck" if s_daily <= 0 else "ok")
+            # цель по размеру — 10% от начального остатка размера (иначе от текущего)
+            s_target = (s_init if s_init is not None else s_stock) * target_frac
+            s_rec_disc = _rec_disc_for(s_stock, s_daily, cur_disc, s_target)
+            s_rec_price = int(round(base_price * (1 - s_rec_disc / 100.0))) if base_price else None
             size_rows.append({
                 "size": sz, "stock": int(s_stock), "soldRecent": s_recent,
                 "initialStock": int(s_init) if s_init is not None else None,
@@ -1517,7 +1570,8 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
                 "dailyRate": round(s_daily, 2), "daysOfSupply": s_dos,
                 "projLeftPct": s_pct, "status": s_status,
                 "currentDiscount": int(cur_disc),
-                "recommendedDiscount": _rec_disc_for(s_stock, s_daily, cur_disc),
+                "recommendedDiscount": s_rec_disc,
+                "currentPrice": cur_price, "recommendedPrice": s_rec_price,
             })
         size_rows.sort(key=lambda x: x["stock"], reverse=True)
 
@@ -1541,6 +1595,8 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
             "deadstock": int(deadstock),
             "currentDiscount": int(cur_disc),
             "recommendedDiscount": int(rec_disc),
+            "currentPrice": cur_price,
+            "recommendedPrice": rec_price,
             "status": status,
             "sizes": size_rows,
         })
@@ -1557,7 +1613,9 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     prev_daily = total_prev / win
     total_trend = round((cur_daily / prev_daily - 1) * 100, 1) if prev_daily > 0 else (100.0 if cur_daily > 0 else 0.0)
 
-    target_left_units = round(total_stock * target_frac)
+    # цель «оставить ≤target%» — от фактического начального остатка (если есть), иначе от текущего
+    target_base = total_initial if total_initial is not None else total_stock
+    target_left_units = round(target_base * target_frac)
     need_sell = max(0.0, total_stock - target_left_units)
     required_daily = need_sell / days_left
     proj_sales = cur_daily * days_left
@@ -1584,6 +1642,16 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     # упёрлись в маржу: нужная скидка глубже, чем позволяет минимальная маржа
     margin_limited = rec_disc_raw > max_disc
 
+    # средневзвешенные цены (₽): текущая и рекомендованная под рекомендуемую скидку
+    priced = [r for r in rows if r.get("currentPrice")]
+    if priced:
+        sw = sum(r["stock"] for r in priced) or 1
+        avg_cur_price = int(round(sum(r["currentPrice"] * r["stock"] for r in priced) / sw))
+        avg_rec_price = int(round(sum((r.get("recommendedPrice") or r["currentPrice"]) * r["stock"] for r in priced) / sw))
+    else:
+        avg_cur_price = avg_rec_price = None
+
+    target_basis = "начального остатка" if total_initial is not None else "текущего остатка"
     if total_stock == 0:
         verdict = "Остатков в категории нет — распродавать нечего."
     elif cur_daily <= 0:
@@ -1591,12 +1659,12 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
                    f"Без скидки вся партия уйдёт в неликвид. Старт — скидка ~{rec_disc_total} %.")
     elif required_daily <= cur_daily:
         verdict = (f"Идём в графике: при темпе {cur_daily:.1f} шт/день к {season_end} "
-                   f"останется ~{proj_left_pct} % — цель ≤ {int(target_remain_pct)} % достижима, "
-                   f"скидку держим на уровне ~{rec_disc_total} %.")
+                   f"останется ~{proj_left_pct} % — цель ≤ {int(target_remain_pct)} % от {target_basis} "
+                   f"({target_left_units} шт) достижима, скидку держим на уровне ~{rec_disc_total} %.")
     else:
-        verdict = (f"Не успеваем: сейчас {cur_daily:.1f} шт/день, а чтобы к {season_end} "
-                   f"осталось ≤ {int(target_remain_pct)} % ({target_left_units} шт), нужно "
-                   f"{required_daily:.1f} шт/день (+{round(uplift_total)} % к темпу). "
+        verdict = (f"Не успеваем: сейчас {cur_daily:.1f} шт/день. Чтобы к {season_end} осталось "
+                   f"≤ {int(target_remain_pct)} % от {target_basis} ({target_left_units} шт), нужно распродать "
+                   f"*{int(round(need_sell))} шт* — темп *{required_daily:.1f} шт/день* (+{round(uplift_total)} % к текущему). "
                    f"Иначе в неликвид ляжет ~{total_deadstock} шт. "
                    f"Рекомендуемая средняя скидка ~{rec_disc_total} %.")
     if margin_limited:
@@ -1656,6 +1724,7 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         s_pct = round(s_proj / st * 100, 1) if st > 0 else 0.0
         s_status = "empty" if st <= 0 else ("stuck" if s_daily <= 0 else "ok")
         s_init = cat_initial_size.get(sz)
+        s_target = (s_init if s_init is not None else st) * target_frac
         size_summary.append({
             "size": sz, "stock": int(st), "soldRecent": rc,
             "initialStock": int(s_init) if s_init is not None else None,
@@ -1663,7 +1732,7 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
             "dailyRate": round(s_daily, 2), "daysOfSupply": s_dos,
             "projLeftPct": s_pct, "status": s_status,
             "currentDiscount": int(round(avg_disc)),
-            "recommendedDiscount": _rec_disc_for(st, s_daily, avg_disc),
+            "recommendedDiscount": _rec_disc_for(st, s_daily, avg_disc, s_target),
         })
     size_summary.sort(key=lambda x: _size_key(x["size"]))
 
@@ -1688,12 +1757,16 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
             "daysOfSupply": dos_total,
             "depletionDate": (today + timedelta(days=dos_total)).isoformat() if dos_total else None,
             "requiredDaily": round(required_daily, 2),
+            "needSell": int(round(need_sell)),
             "projLeft": proj_left,
             "projLeftPct": proj_left_pct,
             "targetLeftUnits": target_left_units,
+            "targetFromInitial": total_initial is not None,
             "deadstock": total_deadstock,
             "currentDiscount": round(avg_disc, 1),
             "recommendedDiscount": rec_disc_total,
+            "currentPrice": avg_cur_price,
+            "recommendedPrice": avg_rec_price,
             "maxDiscountByMargin": max_disc,
             "marginLimited": margin_limited,
             "costSharePct": int(round(cs * 100)),
@@ -1786,9 +1859,11 @@ def build_seasonal_report_message(rep):
     lines += [
         f"⚡ Темп: *{s['currentDaily']} шт/день* (динамика {_trend_arrow(s['trendPct'])})",
         f"⏳ Хватит: {dos_txt}",
-        f"🎯 Чтобы осталось ≤{int(rep['targetRemainPct'])}% ({s['targetLeftUnits']} шт) → нужно *{s['requiredDaily']} шт/день*",
+        f"🎯 Цель ≤{int(rep['targetRemainPct'])}% от {'начального' if s.get('targetFromInitial') else 'текущего'} остатка "
+        f"({s['targetLeftUnits']} шт) → распродать *{s.get('needSell','—')} шт*, темп *{s['requiredDaily']} шт/день*",
         f"🧊 В неликвид при текущем темпе: *~{s['deadstock']} шт* (останется {s['projLeftPct']}%)",
-        f"🏷 Скидка: сейчас ~{s['currentDiscount']}% → рекомендуем *{s['recommendedDiscount']}%*",
+        f"🏷 Скидка: сейчас ~{s['currentDiscount']}% → рекомендуем *{s['recommendedDiscount']}%*"
+        + (f" · цена ~{s['currentPrice']}₽ → *~{s['recommendedPrice']}₽*" if s.get("currentPrice") else ""),
         f"💰 Маржа: макс скидка *{s.get('maxDiscountByMargin','—')}%* "
         f"(себест. {s.get('costSharePct','?')}% · мин. маржа {s.get('minMarginPct','?')}%)"
         + ("  ⚠️ упёрлись в маржу" if s.get("marginLimited") else ""),
@@ -1802,7 +1877,9 @@ def build_seasonal_report_message(rep):
         lines.append("*Что дожимать (топ по неликвиду):*")
         for r in risky:
             disc = f"{r['currentDiscount']}%→{r['recommendedDiscount']}%" if r['recommendedDiscount'] != r['currentDiscount'] else f"{r['currentDiscount']}%"
-            lines.append(f"• {r.get('vendorCode') or r.get('nmId')} — остаток {r['stock']}, {r['dailyRate']}/день, в неликвид {r['deadstock']} шт, скидка {disc}")
+            price = (f" → цена {r['currentPrice']}₽→{r['recommendedPrice']}₽"
+                     if r.get("currentPrice") and r.get("recommendedPrice") and r['recommendedPrice'] != r['currentPrice'] else "")
+            lines.append(f"• {r.get('vendorCode') or r.get('nmId')} — остаток {r['stock']}, {r['dailyRate']}/день, в неликвид {r['deadstock']} шт, скидка {disc}{price}")
 
     # Аналитика по размерам — где залёживается
     sizes = s.get("sizes", [])
