@@ -37,6 +37,14 @@ SALES_DEPT_DIALOG = os.environ.get("SALES_DEPT_DIALOG", "").strip() or "chat2024
 SEASON_REPORT_CATEGORY = os.environ.get("SEASON_REPORT_CATEGORY", "10").strip()
 SEASON_END_DATE = os.environ.get("SEASON_END_DATE", "2026-08-31").strip()
 
+def is_silent_dialog(dialog_id):
+    """Чаты только для отчётов/алертов: бот туда пишет сам, но не приветствует
+    и не ведёт диалог по созданию артикулов (например, чат отдела продаж)."""
+    d = str(dialog_id or "").strip()
+    silent = {str(SALES_DEPT_DIALOG).strip(), str(CTR_ALERT_DIALOG).strip()}
+    silent.discard("")
+    return d in silent
+
 # Ссылка на логотип (необязательно). Приоритет выше файла logo.* в репозитории.
 LOGO_URL = os.environ.get("LOGO_URL", "").strip()
 
@@ -806,12 +814,14 @@ def bitrix_events():
     if event == "ONIMBOTMESSAGEADD":
         dialog_id = vals.get("data[PARAMS][DIALOG_ID]", "").strip()
         text = vals.get("data[PARAMS][MESSAGE]", "").strip()
-        if dialog_id and text:
+        # В «тихих» чатах (отдел продаж, алерты) бот не ведёт диалог по артикулам
+        if dialog_id and text and not is_silent_dialog(dialog_id):
             threading.Thread(target=handle_message, args=(dialog_id, text, auth)).start()
 
     elif event in ("ONIMBOTWELCOMEMESSAGE", "ONIMBOTJOINCHAT"):
         dialog_id = vals.get("data[PARAMS][DIALOG_ID]", "").strip()
-        if dialog_id:
+        # Не приветствуем артикульным сообщением в чатах для отчётов
+        if dialog_id and not is_silent_dialog(dialog_id):
             threading.Thread(target=send_welcome, args=(dialog_id, auth)).start()
 
     elif event in ("ONIMBOTDELETE", "ONAPPUNINSTALL"):
