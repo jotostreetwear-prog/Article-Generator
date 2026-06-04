@@ -1347,26 +1347,54 @@ def lookup_initial(initial_stock, vendor):
             return initial_stock[k]
     return {}
 
-def wb_stats_request(path, params=None, timeout=120):
+# Кэш ответов WB, чтобы не упираться в лимит (429) при повторных «Сформировать».
+_WB_CACHE = {}
+_WB_CACHE_TTL = 180  # сек
+
+def _wb_cache_get(key):
+    v = _WB_CACHE.get(key)
+    if v and (time.time() - v[0]) < _WB_CACHE_TTL:
+        return v[1]
+    return None
+
+def _wb_cache_set(key, data):
+    _WB_CACHE[key] = (time.time(), data)
+
+def wb_stats_request(path, params=None, timeout=120, retries=3):
     if not WB_API_TOKEN:
         raise RuntimeError("WB_API_TOKEN не задан — нужен токен с доступом к категории «Статистика».")
     url = WB_STATS_BASE + path
-    r = httpx.get(url, headers={"Authorization": WB_API_TOKEN}, params=params, timeout=timeout)
-    if r.status_code >= 400:
+    detail = None
+    for attempt in range(retries + 1):
+        r = httpx.get(url, headers={"Authorization": WB_API_TOKEN}, params=params, timeout=timeout)
+        if r.status_code == 429:  # лимит WB — подождём и повторим
+            try:
+                detail = r.json()
+            except Exception:
+                detail = r.text[:500]
+            if attempt < retries:
+                time.sleep(min(20, 3 * (2 ** attempt)))  # 3, 6, 12 c
+                continue
+            raise RuntimeError(f"WB stats {path} 429: {detail}")
+        if r.status_code >= 400:
+            try:
+                detail = r.json()
+            except Exception:
+                detail = r.text[:500]
+            raise RuntimeError(f"WB stats {path} {r.status_code}: {detail}")
         try:
-            detail = r.json()
+            return r.json() or []
         except Exception:
-            detail = r.text[:500]
-        raise RuntimeError(f"WB stats {path} {r.status_code}: {detail}")
-    try:
-        data = r.json()
-    except Exception:
-        return []
-    return data or []
+            return []
 
 def fetch_wb_stocks():
-    """Актуальный срез остатков по всем складам."""
-    return wb_stats_request("/api/v1/supplier/stocks", params={"dateFrom": "2020-01-01"})
+    """Актуальный срез остатков по всем складам (с кэшем)."""
+    cached = _wb_cache_get("stocks")
+    if cached is not None:
+        return cached
+    data = wb_stats_request("/api/v1/supplier/stocks", params={"dateFrom": "2020-01-01"})
+    _wb_cache_set("stocks", data)
+    return data
 
 WB_PRICES_BASE = "https://discounts-prices-api.wildberries.ru"
 
@@ -1387,9 +1415,12 @@ def fetch_wb_prices():
     return out
 
 def fetch_wb_prices_goods():
-    """Сырой список номенклатур из WB Prices API (с пагинацией). [] если нет доступа."""
+    """Сырой список номенклатур из WB Prices API (с пагинацией, с кэшем). [] если нет доступа."""
     if not WB_API_TOKEN:
         return []
+    cached = _wb_cache_get("prices_goods")
+    if cached is not None:
+        return cached
     goods_all = []
     offset, limit = 0, 1000
     try:
@@ -1408,6 +1439,7 @@ def fetch_wb_prices_goods():
             offset += limit
     except Exception:
         return goods_all
+    _wb_cache_set("prices_goods", goods_all)
     return goods_all
 
 def fetch_wb_prices_by_vendor():
@@ -1431,6 +1463,9 @@ def fetch_wb_orders(date_from):
     WB отдаёт заказы пачками (до ~80 000 за ответ). Чтобы охватить весь объём
     (все шорты без потерь), идём по курсору lastChangeDate и дедупим по srid.
     """
+    cached = _wb_cache_get(f"orders:{date_from}")
+    if cached is not None:
+        return cached
     collected = {}
     cursor_from = date_from
     for _ in range(60):  # защита от зацикливания
@@ -1452,11 +1487,16 @@ def fetch_wb_orders(date_from):
         if new_count == 0 or max_lc == cursor_from:
             break
         cursor_from = max_lc
-    return list(collected.values())
+    result = list(collected.values())
+    _wb_cache_set(f"orders:{date_from}", result)
+    return result
 
 def fetch_wb_sales(date_from):
     """Продажи (выкупы) с указанной даты, пагинация по lastChangeDate, дедуп по saleID.
     Записи с saleID 'S...' — выкуп, 'R...' — возврат."""
+    cached = _wb_cache_get(f"sales:{date_from}")
+    if cached is not None:
+        return cached
     collected = {}
     cursor_from = date_from
     for _ in range(60):
@@ -1477,7 +1517,9 @@ def fetch_wb_sales(date_from):
         if new_count == 0 or max_lc == cursor_from:
             break
         cursor_from = max_lc
-    return list(collected.values())
+    result = list(collected.values())
+    _wb_cache_set(f"sales:{date_from}", result)
+    return result
 
 def _match_seasonal(rec, category_code, keywords):
     """Запись относится к нужной категории по артикулу J<код>… или по названию предмета."""
@@ -1575,7 +1617,12 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     orders = fetch_wb_orders(start_prev.strftime("%Y-%m-%d"))
     stocks = fetch_wb_stocks()
     prices = fetch_wb_prices()   # цены/скидки по nmId (надёжнее поля Price в остатках)
-    sales = fetch_wb_sales(start_recent.strftime("%Y-%m-%d"))  # выкупы за окно (для % выкупа)
+    try:
+        sales = fetch_wb_sales(start_recent.strftime("%Y-%m-%d"))  # выкупы за окно (для % выкупа)
+        sales_available = True
+    except Exception:
+        sales = []            # лимит/нет доступа — отчёт всё равно строим
+        sales_available = False  # % выкупа просто не покажем (вместо ложного 0%)
 
     def _norm_size(v):
         sz = str(v or "").strip()
@@ -1652,8 +1699,8 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         stock = stock_by_nm.get(nm, 0)
         sold_recent = recent.get(nm, 0)           # заказы за окно
         sold_prev = prev.get(nm, 0)
-        sales_cnt = sales_recent.get(nm, 0)       # выкупы за окно
-        buyout_pct = round(sales_cnt / sold_recent * 100) if sold_recent > 0 else None
+        sales_cnt = sales_recent.get(nm, 0) if sales_available else None  # выкупы за окно
+        buyout_pct = (round(sales_cnt / sold_recent * 100) if (sales_available and sold_recent > 0) else None)
         daily = sold_recent / win
         daily_prev = sold_prev / win
 
@@ -1779,8 +1826,8 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     total_initial = sum(r["initialStock"] for r in rows if r.get("initialStock") is not None) if has_initial else None
     total_sold_since = max(0, total_initial - total_stock) if total_initial is not None else None
     total_recent = sum(r["soldRecent"] for r in rows)
-    total_sales = sum(r["salesRecent"] for r in rows)
-    total_buyout = round(total_sales / total_recent * 100) if total_recent > 0 else None
+    total_sales = sum((r["salesRecent"] or 0) for r in rows) if sales_available else None
+    total_buyout = (round(total_sales / total_recent * 100) if (sales_available and total_recent > 0) else None)
     total_prev = sum(prev.values())
     cur_daily = total_recent / win
     prev_daily = total_prev / win
@@ -2038,7 +2085,8 @@ def build_seasonal_report_message(rep):
         f"📦 Остаток: *{s['totalStock']} шт*",
         f"🛒 За {rep['lookbackDays']} дн"
         + (f" ({_fmt_date_ru(rep['periodStart'])}–{_fmt_date_ru(rep['periodEnd'])})" if rep.get('periodStart') else "")
-        + f": заказов {s['soldRecent']} шт · продаж (выкупов) {s.get('salesRecent', 0)} шт"
+        + f": заказов {s['soldRecent']} шт"
+        + (f" · продаж (выкупов) {s['salesRecent']} шт" if s.get('salesRecent') is not None else "")
         + (f" · выкуп {s['buyoutPct']}%" if s.get('buyoutPct') is not None else ""),
     ]
     if s.get("initialStock") is not None:
