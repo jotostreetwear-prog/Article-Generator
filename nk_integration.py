@@ -36,12 +36,12 @@ NK_BASE_URL = os.environ.get("NK_BASE_URL", "https://апи.национальн
 # Названия методов generate-gtins / product-create подтверждены документацией ЦРПТ.
 # TODO[NK-DOCS]: сверьте полные пути (префикс версии /v3 или /v4) с документацией ЛК.
 NK_PATHS = {
-    "feed_info": "/v3/feed-info",            # информация об аккаунте/правах
+    "feed_info": "/v4/feed-info",            # информация об аккаунте/правах
     "categories": "/v3/categories",          # дерево категорий НК
     "attributes": "/v3/attributes",          # атрибуты категории
     "generate_gtins": "/v3/generate-gtins",  # генерация черновиков ГТИН
     "product_create": "/v3/product-create",  # создание карточки «Единица товара»
-    "product_list": "/v3/product-list",      # список товаров (статусы/ГТИНы)
+    "product_list": "/v4/product-list",      # список товаров (статусы/ГТИНы) — подтверждён v4
 }
 
 # Ожидание присвоения/активации ГТИН (если нужно опрашивать список товаров).
