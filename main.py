@@ -2482,6 +2482,36 @@ def api_nk_create_gtins():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
+@app.route("/api/wb/nk-probe", methods=["GET"])
+def api_wb_nk_probe():
+    """Диагностика: перебирает возможные методы API НК и показывает статусы.
+    Нужен NK_API_KEY. Помогает найти правильный путь получения товаров."""
+    if not nk.NK_API_KEY and not nk.NK_TOKEN:
+        return jsonify({"ok": False, "error": "NK_API_KEY не задан"}), 400
+    base = nk.NK_BASE_URL
+    headers = {}
+    if nk.NK_TOKEN:
+        headers["Authorization"] = "Bearer " + nk.NK_TOKEN
+    params = {"apikey": nk.NK_API_KEY} if nk.NK_API_KEY else {}
+    cands = [
+        ("GET", "/v3/feed-info"), ("GET", "/v3/feed-status"),
+        ("GET", "/v3/product-list"), ("POST", "/v3/product-list"),
+        ("GET", "/v3/product"), ("GET", "/v3/products"), ("GET", "/v3/goods"),
+        ("GET", "/v3/feeds"), ("GET", "/v3/feed"), ("GET", "/v3/category-list"),
+        ("GET", "/v3/product-info"), ("GET", "/v2/product-list"),
+        ("GET", "/api/v3/product-list"), ("GET", "/v4/product-list"),
+    ]
+    out = []
+    for method, path in cands:
+        try:
+            r = httpx.request(method, base + path, params=params, headers=headers,
+                              json=({} if method == "POST" else None), timeout=15)
+            body = (r.text or "")[:140].replace("\n", " ")
+            out.append({"m": method, "path": path, "status": r.status_code, "body": body})
+        except Exception as e:
+            out.append({"m": method, "path": path, "error": str(e)[:120]})
+    return jsonify({"ok": True, "base": base, "results": out})
+
 @app.route("/api/wb/nk-products", methods=["GET"])
 def api_wb_nk_products():
     """Автоматически тянет товары из Честного ЗНАка (Национального каталога) по API
