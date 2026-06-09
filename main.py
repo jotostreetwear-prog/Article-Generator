@@ -2493,30 +2493,24 @@ def api_wb_nk_probe():
     if nk.NK_TOKEN:
         headers["Authorization"] = "Bearer " + nk.NK_TOKEN
     params = {"apikey": nk.NK_API_KEY} if nk.NK_API_KEY else {}
-    # v4 подтверждён рабочим. Ищем, как достать товары и есть ли инфо об аккаунте (party_id).
-    cands = [
-        ("GET", "/v4/feed-info", {}),
-        ("GET", "/v4/feed-status", {}),
-        ("GET", "/v4/product-list", {"limit": 5}),
-        ("GET", "/v4/product-list", {"limit": 5, "include_attributes": "true"}),
-        ("GET", "/v4/product-list", {"limit": 5, "good_statuses[]": "published"}),
-        ("GET", "/v4/feeds", {}),
-        ("GET", "/v4/suppliers", {}),
-        ("GET", "/v4/supplier-list", {}),
-        ("GET", "/v4/account", {}),
-        ("GET", "/v4/profile", {}),
-        ("GET", "/v4/category-list", {"limit": 3}),
-        ("GET", "/v4/feed-product-list", {"limit": 5}),
-    ]
+    # v4/product-list работает, но список пуст. Перебираем статусы и форматы фильтра товара.
+    statuses = ["draft", "moderation", "moderation_declined", "signed", "published",
+                "ready_to_publish", "errored", "archived", "verification", "ready",
+                "handler_error", "new", "all"]
+    cands = [("GET", "/v4/product-list", {"limit": 3})]
+    for s in statuses:
+        cands.append(("GET", "/v4/product-list", {"limit": 3, "good_statuses[]": s}))
+    cands.append(("GET", "/v4/product-list", {"limit": 3, "good_status": "all"}))
+    cands.append(("GET", "/v4/product-list", {"limit": 3, "with_attributes": "true"}))
     out = []
     for method, path, extra in cands:
         p = dict(params); p.update(extra)
         try:
             r = httpx.request(method, base + path, params=p, headers=headers, timeout=15)
-            body = (r.text or "")[:400].replace("\n", " ")
-            out.append({"m": method, "path": path, "extra": extra, "status": r.status_code, "body": body})
+            body = (r.text or "")[:300].replace("\n", " ")
+            out.append({"extra": extra, "status": r.status_code, "body": body})
         except Exception as e:
-            out.append({"m": method, "path": path, "extra": extra, "error": str(e)[:120]})
+            out.append({"extra": extra, "error": str(e)[:120]})
     return jsonify({"ok": True, "base": base, "results": out})
 
 @app.route("/api/wb/nk-products", methods=["GET"])
