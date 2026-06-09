@@ -31,7 +31,7 @@ NK_API_KEY = os.environ.get("NK_API_KEY", "").strip()
 NK_PARTY_ID = os.environ.get("NK_PARTY_ID", "").strip()
 NK_TOKEN = os.environ.get("NK_TOKEN", "").strip()  # опционально: bearer ГИС МТ
 # TODO[NK-DOCS]: подставьте базовый URL из документации НК (ЛК «Честный ЗНАК»).
-NK_BASE_URL = os.environ.get("NK_BASE_URL", "https://api.national-catalog.ru").strip().rstrip("/")
+NK_BASE_URL = os.environ.get("NK_BASE_URL", "https://апи.национальный-каталог.рф").strip().rstrip("/")
 
 # Названия методов generate-gtins / product-create подтверждены документацией ЦРПТ.
 # TODO[NK-DOCS]: сверьте полные пути (префикс версии /v3 или /v4) с документацией ЛК.
