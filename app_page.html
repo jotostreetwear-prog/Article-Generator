@@ -134,6 +134,31 @@ input.invalid{ border-color:#e0483a; box-shadow:0 0 0 4px rgba(224,72,58,.16); }
 [data-style="A"] .result-card{ border:none; border-top:2px solid var(--line-strong); border-radius:0;
   background:transparent; box-shadow:none; padding:22px 0 0; }
 [data-style="A"] .code{ font-size:38px; }
+.guide{ margin-top:30px; border-top:1px solid var(--line); }
+.guide > summary{ list-style:none; cursor:pointer; padding:18px 0 4px; display:flex; align-items:center;
+  gap:10px; font-size:11px; letter-spacing:.16em; text-transform:uppercase; font-weight:700; color:var(--ink-2);
+  transition:color .16s var(--ease); }
+.guide > summary::-webkit-details-marker{ display:none; }
+.guide > summary:hover{ color:var(--ink); }
+.guide > summary .g-chev{ width:13px; height:13px; transition:transform .2s var(--ease); color:var(--ink-3); }
+.guide[open] > summary .g-chev{ transform:rotate(180deg); }
+.guide-body{ padding:8px 0 4px; animation:rise .32s var(--ease) both; }
+.guide-formula{ font-family:var(--mono); font-size:15px; line-height:1.5; color:var(--ink); background:var(--surface-2);
+  border:1px solid var(--line); border-radius:var(--r); padding:13px 15px; margin:4px 0 18px; word-break:break-all; }
+.guide-formula b{ color:var(--accent-deep); font-weight:600; }
+[data-theme="dark"] .guide-formula b{ color:var(--accent); }
+.guide-formula .gf-cat{ color:var(--ink); background:color-mix(in srgb,var(--accent) 22%, transparent);
+  border-radius:5px; padding:0 4px; }
+.guide-formula .gf-mod{ color:var(--ink); border-bottom:2px solid var(--accent); }
+.checklist{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:14px; }
+.checklist li{ display:flex; gap:12px; align-items:flex-start; font-size:14px; line-height:1.5; color:var(--ink-2); }
+.checklist li b{ color:var(--ink); font-weight:600; }
+.checklist .ck{ flex:none; width:22px; height:22px; border-radius:7px; background:var(--accent); color:var(--accent-ink);
+  font-family:var(--mono); font-weight:700; font-size:12px; display:grid; place-items:center; margin-top:1px; box-shadow:var(--glow); }
+.checklist code{ font-family:var(--mono); font-size:13px; background:var(--surface-2); border:1px solid var(--line);
+  border-radius:5px; padding:1px 6px; color:var(--ink); }
+.guide-note{ margin:18px 0 0; font-size:12.5px; line-height:1.5; color:var(--ink-3); padding-left:12px;
+  border-left:2px solid var(--line); }
 #theme-toggle{ position:fixed; bottom:14px; right:14px; z-index:50; width:40px; height:40px;
   border-radius:50%; cursor:pointer; display:grid; place-items:center; font-size:15px; line-height:1;
   background:color-mix(in srgb, var(--surface) 90%, transparent); color:var(--ink-2);
@@ -217,6 +242,27 @@ input.invalid{ border-color:#e0483a; box-shadow:0 0 0 4px rgba(224,72,58,.16); }
         </button>
       </div>
     </section>
+
+    <details class="guide" id="guide">
+      <summary>
+        Как формируется артикул — памятка
+        <svg class="g-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="guide-body">
+        <div class="guide-formula">
+          <b>J</b><span class="gf-cat">05</span><span class="gf-mod">003</span>/<b>black</b><br>
+          <b>J</b> — бренд Joto · <span class="gf-cat">05</span> — категория (2 цифры) · <span class="gf-mod">003</span> — модель (3 цифры) · цвет через «/»
+        </div>
+        <ol class="checklist">
+          <li><span class="ck">1</span><span><b>Бренд.</b> Артикул всегда начинается с <code>J</code> — это бренд Joto.</span></li>
+          <li><span class="ck">2</span><span><b>Категория.</b> Выберите категорию из списка — её 2-значный код подставляется автоматически (например, Худи → <code>05</code>).</span></li>
+          <li><span class="ck">3</span><span><b>Номер модели.</b> Система сама выдаёт следующий свободный 3-значный номер (<code>001</code>, <code>002</code>, <code>003</code>…). Вручную считать не нужно.</span></li>
+          <li><span class="ck">4</span><span><b>Цвет.</b> Укажите цвет — он добавится через «/» без пробелов: <code>J05003/black</code>.</span></li>
+          <li><span class="ck">5</span><span><b>Готово.</b> Нажмите «Создать артикул» и скопируйте результат кнопкой.</span></li>
+        </ol>
+        <p class="guide-note">Новое лекало или конструкция — это <b>новая модель</b>: меняется только номер модели, код категории остаётся прежним (например, Худи всегда <code>05</code>).</p>
+      </div>
+    </details>
   </main>
 </div>
 
@@ -439,6 +485,9 @@ copyBtn.addEventListener("click", async function(){
   });
   sync();
 })();
+
+var guideEl = document.getElementById("guide");
+if (guideEl){ guideEl.addEventListener("toggle", fit); }
 
 loadLogo();
 detectMode().then(loadCategories).then(function(){ fit(); });
