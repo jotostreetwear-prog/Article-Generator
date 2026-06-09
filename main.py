@@ -2327,11 +2327,26 @@ def api_wb_token_check():
         verdict = "❌ Токен только на чтение — создайте токен «Контент» БЕЗ галочки «Только на чтение»"
     else:
         verdict = "⚠ Запись не определена: " + write_reason
+    # Разбор самого токена (JWT): хвост для сравнения + флаг read-only (бит внутри scope)
+    token_info = {"tail": WB_API_TOKEN[-4:], "len": len(WB_API_TOKEN)}
+    try:
+        import base64, json as _json
+        payload = WB_API_TOKEN.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        claims = _json.loads(base64.urlsafe_b64decode(payload))
+        s = claims.get("s")
+        token_info["scope_s"] = s
+        token_info["sandbox"] = bool(claims.get("t"))
+        if isinstance(s, int):
+            token_info["read_only_in_token"] = bool((s >> 30) & 1)  # бит 30 = «только на чтение»
+    except Exception as e:
+        token_info["decode_error"] = str(e)[:120]
     return jsonify({
         "ok": all(v.get("ok") for v in cats.values()),
         "categories": cats,
         "content_write": write,
         "verdict": verdict,
+        "token": token_info,
         "hint": "statistics — распродажа (остатки/заказы), prices — цены, content — карточки",
     })
 
