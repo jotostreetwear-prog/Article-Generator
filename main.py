@@ -1700,9 +1700,10 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         dos = (stock_full / eff_daily) if eff_daily > 0 else None
         depletion = (today + timedelta(days=int(round(dos)))).isoformat() if dos is not None else None
 
+        # Все расчёты ведём от ОБЩЕГО количества (quantityFull); выкуп уже в чистом темпе.
         proj_sales = eff_daily * days_left
-        proj_left = max(0.0, stock - proj_sales)
-        proj_left_pct = round(proj_left / stock * 100, 1) if stock > 0 else 0.0
+        proj_left = max(0.0, stock_full - proj_sales)
+        proj_left_pct = round(proj_left / stock_full * 100, 1) if stock_full > 0 else 0.0
 
         # фактический начальный остаток по этому артикулу (из приходов), с переводом цвета
         init_item = lookup_initial(initial_stock, meta.get("vendorCode"))
@@ -1710,14 +1711,14 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         init_sizes = init_item.get("sizes", {}) or {}
         if init_item:
             has_initial = True
-        # продано/ушло со склада с момента прихода = начальный − текущий (≥0)
-        sold_since = max(0, int(init_total) - int(stock)) if init_total is not None else None
+        # продано/ушло со склада с момента прихода = начальный − общее (≥0)
+        sold_since = max(0, int(init_total) - int(stock_full)) if init_total is not None else None
 
         # Цель «оставить ≤target%» считаем от ФАКТИЧЕСКОГО НАЧАЛЬНОГО остатка (если он есть),
-        # иначе — от текущего остатка.
-        base_for_target = init_total if init_total is not None else stock
+        # иначе — от общего количества.
+        base_for_target = init_total if init_total is not None else stock_full
         target_left_units = base_for_target * target_frac
-        need_sell = max(0.0, stock - target_left_units)
+        need_sell = max(0.0, stock_full - target_left_units)
         required_daily = need_sell / days_left
         deadstock = max(0.0, round(proj_left - target_left_units))  # сверх плана ляжет в неликвид
 
@@ -1727,7 +1728,7 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         cur_disc = pinfo.get("discount") if pinfo.get("discount") is not None else (meta.get("discount") or 0)
         rec_disc = cur_disc
         status = "ok"
-        if stock <= 0:
+        if stock_full <= 0:
             status = "empty"
         elif eff_daily <= 0:
             status = "stuck"  # есть остаток, но нет чистых продаж
@@ -1757,13 +1758,14 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
                 cat_initial_size[sz] = cat_initial_size.get(sz, 0) + int(s_init)
             s_daily = s_recent / win
             s_eff = s_daily * buyout_frac_nm       # чистый темп размера с учётом выкупа
-            s_dos = int(round(s_full / s_eff)) if s_eff > 0 else None   # хватит — от общего
-            s_proj_left = max(0.0, s_stock - s_eff * days_left)
-            s_pct = round(s_proj_left / s_stock * 100, 1) if s_stock > 0 else 0.0
-            s_status = "empty" if s_stock <= 0 else ("stuck" if s_eff <= 0 else "ok")
-            # цель по размеру — 10% от начального остатка размера (иначе от текущего)
-            s_target = (s_init if s_init is not None else s_stock) * target_frac
-            s_rec_disc = _rec_disc_for(s_stock, s_eff, cur_disc, s_target)
+            # всё по размеру — от общего количества (quantityFull)
+            s_dos = int(round(s_full / s_eff)) if s_eff > 0 else None
+            s_proj_left = max(0.0, s_full - s_eff * days_left)
+            s_pct = round(s_proj_left / s_full * 100, 1) if s_full > 0 else 0.0
+            s_status = "empty" if s_full <= 0 else ("stuck" if s_eff <= 0 else "ok")
+            # цель по размеру — 10% от начального остатка размера (иначе от общего)
+            s_target = (s_init if s_init is not None else s_full) * target_frac
+            s_rec_disc = _rec_disc_for(s_full, s_eff, cur_disc, s_target)
             s_rec_price = int(round(base_price * (1 - s_rec_disc / 100.0))) if base_price else None
             size_rows.append({
                 "size": sz, "stock": int(s_stock), "soldRecent": s_recent,
@@ -1816,7 +1818,7 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     total_stock = sum(r["stock"] for r in rows)
     total_full = sum((r.get("stockFull") or 0) for r in rows)   # общее по категории (для «хватит»)
     total_initial = sum(r["initialStock"] for r in rows if r.get("initialStock") is not None) if has_initial else None
-    total_sold_since = max(0, total_initial - total_stock) if total_initial is not None else None
+    total_sold_since = max(0, total_initial - total_full) if total_initial is not None else None
     total_recent = sum(r["soldRecent"] for r in rows)
     total_sales = sum((r["salesRecent"] or 0) for r in rows) if sales_available else None
     # % выкупа по категории — за длинное окно (стабильный), он же используется в чистом темпе
@@ -1829,13 +1831,14 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     eff_cur_daily = cur_daily * cat_buyout_frac
 
     # цель «оставить ≤target%» — от фактического начального остатка (если есть), иначе от текущего
-    target_base = total_initial if total_initial is not None else total_stock
+    # Всё считаем от ОБЩЕГО количества по категории (quantityFull); выкуп — в чистом темпе.
+    target_base = total_initial if total_initial is not None else total_full
     target_left_units = round(target_base * target_frac)
-    need_sell = max(0.0, total_stock - target_left_units)
+    need_sell = max(0.0, total_full - target_left_units)
     required_daily = need_sell / days_left
     proj_sales = eff_cur_daily * days_left
-    proj_left = max(0.0, round(total_stock - proj_sales))
-    proj_left_pct = round(proj_left / total_stock * 100, 1) if total_stock > 0 else 0.0
+    proj_left = max(0.0, round(total_full - proj_sales))
+    proj_left_pct = round(proj_left / total_full * 100, 1) if total_full > 0 else 0.0
     total_deadstock = max(0, round(proj_left - target_left_units))
     # «на сколько хватит» по категории — от ОБЩЕГО количества (quantityFull)
     dos_total = int(round(total_full / eff_cur_daily)) if eff_cur_daily > 0 else None
@@ -1872,10 +1875,10 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     target_basis = "начального остатка" if total_initial is not None else "текущего остатка"
     buyout_note = (f" (чистый темп {eff_cur_daily:.1f} с учётом выкупа {total_buyout}%)"
                    if total_buyout is not None else "")
-    if total_stock == 0:
+    if total_full == 0:
         verdict = "Остатков в категории нет — распродавать нечего."
     elif eff_cur_daily <= 0:
-        verdict = (f"Продаж за {win} дн. нет, а на складе {total_stock} шт. "
+        verdict = (f"Продаж за {win} дн. нет, а на складе {total_full} шт. "
                    f"Без скидки вся партия уйдёт в неликвид. Старт — скидка ~{rec_disc_total} %.")
     elif required_daily <= eff_cur_daily:
         verdict = (f"Идём в графике: при чистом темпе {eff_cur_daily:.1f} шт/день к {season_end} "
@@ -1896,7 +1899,7 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     # Модель: +1 п.п. скидки ≈ +elasticity% к заказам. Считаем, как изменится темп,
     # за сколько распродадим цель (90%) и сколько останется к концу сезона.
     scenarios = []
-    if total_stock > 0 and eff_cur_daily > 0:
+    if total_full > 0 and eff_cur_daily > 0:
         base_days_to_target = need_sell / eff_cur_daily if eff_cur_daily > 0 else None
         for delta in [0, 5, 10, 15, 20, 30]:
             total_disc = int(round(avg_disc + delta))
@@ -1908,8 +1911,8 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
             if new_daily <= 0:
                 continue
             days_to_target = need_sell / new_daily
-            s_proj_left = max(0.0, total_stock - new_daily * days_left)
-            s_proj_left_pct = round(s_proj_left / total_stock * 100, 1) if total_stock else 0.0
+            s_proj_left = max(0.0, total_full - new_daily * days_left)
+            s_proj_left_pct = round(s_proj_left / total_full * 100, 1) if total_full else 0.0
             saved = int(round(base_days_to_target - days_to_target)) if base_days_to_target else 0
             scenarios.append({
                 "addDiscount": delta,                      # +п.п. к текущей скидке
@@ -1942,13 +1945,14 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         rc = d.get("recent", 0)
         s_daily = rc / win
         s_eff = s_daily * cat_buyout_frac     # чистый темп размера по категории (с учётом выкупа)
-        s_dos = int(round(st_full / s_eff)) if s_eff > 0 else None   # хватит — от общего
-        s_proj = max(0.0, st - s_eff * days_left)
-        s_pct = round(s_proj / st * 100, 1) if st > 0 else 0.0
-        s_status = "empty" if st <= 0 else ("stuck" if s_eff <= 0 else "ok")
+        # всё по размеру категории — от общего (quantityFull)
+        s_dos = int(round(st_full / s_eff)) if s_eff > 0 else None
+        s_proj = max(0.0, st_full - s_eff * days_left)
+        s_pct = round(s_proj / st_full * 100, 1) if st_full > 0 else 0.0
+        s_status = "empty" if st_full <= 0 else ("stuck" if s_eff <= 0 else "ok")
         s_init = cat_initial_size.get(sz)
-        s_target = (s_init if s_init is not None else st) * target_frac
-        s_rec_d = _rec_disc_for(st, s_eff, avg_disc, s_target)
+        s_target = (s_init if s_init is not None else st_full) * target_frac
+        s_rec_d = _rec_disc_for(st_full, s_eff, avg_disc, s_target)
         # средняя базовая цена по категории (из текущей цены и средней скидки)
         avg_base = (avg_cur_price / (1 - avg_disc / 100.0)) if (avg_cur_price and avg_disc < 100) else None
         z_rec_price = int(round(avg_base * (1 - s_rec_d / 100.0))) if avg_base else None
@@ -1978,6 +1982,7 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         "elasticity": elasticity,
         "summary": {
             "totalStock": total_stock,
+            "totalFull": total_full,
             "initialStock": total_initial,
             "soldSinceStart": total_sold_since,
             "soldRecent": total_recent,
@@ -2083,7 +2088,8 @@ def build_seasonal_report_message(rep):
         f"📉 *Распродажа сезона — {rep['title']}*",
         f"Отчёт на {rep.get('generatedAt','')} · до конца сезона {rep['daysLeft']} дн (до {rep['seasonEnd']})",
         "",
-        f"📦 Остаток: *{s['totalStock']} шт*",
+        f"📦 Остаток: *{s.get('totalFull', s['totalStock'])} шт* (общее)"
+        + (f" · на ВБ {s['totalStock']} шт" if s.get('totalFull') is not None and s['totalFull'] != s['totalStock'] else ""),
         f"🛒 За {rep['lookbackDays']} дн"
         + (f" ({_fmt_date_ru(rep['periodStart'])}–{_fmt_date_ru(rep['periodEnd'])})" if rep.get('periodStart') else "")
         + f": заказов {s['soldRecent']} шт"

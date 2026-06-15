@@ -322,7 +322,7 @@ function paintSummary(s, sizes, rep, row){
   var buy = (s.buyoutPct!=null) ? kpi("Выкуп", s.buyoutPct+"%", "за 60 дн · учтён в «хватит» и прогнозе") : "";
   $("kpis").innerHTML =
     (s.initialStock!=null ? kpi("Начальный остаток", fmt(s.initialStock)+" шт", "факт приход · ушло со склада "+fmt(s.soldSinceStart)+" шт") : "") +
-    kpi("Остаток на ВБ", fmt(s.totalStock)+" шт", "за "+rep.lookbackDays+" дн"+(rep.periodStart?(" · "+fmtDate(rep.periodStart)+"–"+fmtDate(rep.periodEnd)):"")+": заказов "+fmt(s.soldRecent)+(s.salesRecent!=null?(", продаж "+fmt(s.salesRecent)):"")+" шт") +
+    kpi("Остаток (общее)", fmt(s.totalFull!=null?s.totalFull:s.totalStock)+" шт", "на ВБ "+fmt(s.totalStock)+" шт · за "+rep.lookbackDays+" дн"+(rep.periodStart?(" · "+fmtDate(rep.periodStart)+"–"+fmtDate(rep.periodEnd)):"")+": заказов "+fmt(s.soldRecent)+(s.salesRecent!=null?(", продаж "+fmt(s.salesRecent)):"")+" шт") +
     buy +
     kpi("Темп продаж", s.currentDaily+" шт/день", "динамика к пред. периоду", trendCls, trendHtml(s.trendPct)) +
     kpi("Хватит остатка", (s.daysOfSupply==null?"∞":s.daysOfSupply+" дн"), (s.depletionDate?("обнулится "+fmtDate(s.depletionDate)):"при текущем темпе")+(s.buyoutPct!=null?" · с учётом выкупа "+s.buyoutPct+"%":"")) +
@@ -377,13 +377,14 @@ function applyArtFilter(){
 // Сводка по одному артикулу (для фильтра) — из строки отчёта
 function rowToSummary(r, rep){
   var initBased = r.initialStock!=null;
-  var base = initBased ? r.initialStock : r.stock;
+  var full = (r.stockFull!=null?r.stockFull:r.stock);
+  var base = initBased ? r.initialStock : full;
   var tgtFrac = (parseFloat(rep.targetRemainPct)||0)/100;
   var targetLeft = Math.round(base*tgtFrac);
-  var needSell = Math.max(0, r.stock - targetLeft);
+  var needSell = Math.max(0, full - targetLeft);
   var maxD = rep.summary.maxDiscountByMargin;
   return {
-    totalStock:r.stock, initialStock:r.initialStock, soldSinceStart:r.soldSinceStart,
+    totalStock:r.stock, totalFull:r.stockFull, initialStock:r.initialStock, soldSinceStart:r.soldSinceStart,
     soldRecent:r.soldRecent, salesRecent:r.salesRecent, buyoutPct:r.buyoutPct,
     currentDaily:r.dailyRate, trendPct:r.trendPct,
     daysOfSupply:r.daysOfSupply, depletionDate:r.depletionDate, requiredDaily:r.requiredDaily,
@@ -496,7 +497,7 @@ function render(rep){
   });
   $("methodology").innerHTML = "ⓘ Источник: WB Статистика. Темп = заказы после отмён за период "+
     fmtDate(rep.periodStart)+"–"+fmtDate(rep.periodEnd)+" ("+rep.lookbackDays+" дн), они же списывают остаток. "+
-    "Остаток на ВБ = quantity (доступно к продаже). «Хватит до» считается от ОБЩЕГО количества (quantityFull, со всем в пути), а «сколько распродать»/прогноз/неликвид — от остатка на ВБ. Темп — чистый (заказы × % выкупа). Цена — из WB «Цены и скидки», мин. цена — предел по марже. "+
+    "Все расчёты (хватит, сколько распродать, прогноз, неликвид, скидки) — от ОБЩЕГО количества (quantityFull, со всем в пути), темп чистый (заказы × % выкупа). Цель «оставить ≤10%» — от фактического начального остатка (приходы). «Остаток на ВБ» (quantity) и колонки к клиенту/от клиента — справочно. Цена — из WB «Цены и скидки», мин. цена — предел по марже. "+
     "Артикулов в категории: "+(rep.count!=null?rep.count:(rep.rows||[]).length)+"."+
     (s.pricesAvailable===false?" <b style='color:var(--bad)'>⚠️ Цены не загрузились — у WB-токена нет доступа к категории «Цены и скидки».</b>":"");
   $("empty").hidden = (rep.rows||[]).length>0;
@@ -553,23 +554,23 @@ function demoReport(p){
   var BF=0.88;  // демо-выкуп
   arts.forEach(function(a){
     var stock=a[2], daily=a[3], cur=a[4];
+    var toCl=Math.round(stock*0.15), fromCl=Math.round(stock*0.03);
+    var stockFull=stock+toCl;                 // общее — база всех расчётов
     var eff=daily*BF;  // чистый темп с учётом выкупа
-    var proj=Math.max(0,Math.round(stock-eff*daysLeft));
-    var need=Math.max(0,stock*(1-tgt)), req=need/daysLeft;
-    var ds=Math.max(0,Math.round(proj-stock*tgt));
+    var proj=Math.max(0,Math.round(stockFull-eff*daysLeft));
+    var need=Math.max(0,stockFull*(1-tgt)), req=need/daysLeft;
+    var ds=Math.max(0,Math.round(proj-stockFull*tgt));
     var rec=cur, status="ok";
     if(eff<=0){status="stuck";rec=Math.min(maxDisc,Math.max(cur+30,40));}
     else if(req>eff){status="accelerate";rec=Math.min(maxDisc,Math.round(cur+(req/eff-1)*100/2));}
-    var toCl=Math.round(stock*0.15), fromCl=Math.round(stock*0.03);
-    var stockFull=stock+toCl;
     var dos=eff>0?Math.round(stockFull/eff):null;   // хватит — от общего
-    var initial=Math.round(stock*1.7), soldSince=initial-stock;
+    var initial=Math.round(stockFull*1.7), soldSince=Math.max(0,initial-stockFull);
     var ordCnt=Math.round(daily*win), salCnt=Math.round(ordCnt*0.88);
     rows.push({vendorCode:a[0],subject:a[1],size:"M",nmId:200000000+rows.length,stock:stock,stockFull:stockFull,toClient:toCl,fromClient:fromCl,dailyRate:daily,trendPct:[ -12,8,24,0,-5][rows.length],
       soldRecent:ordCnt,salesRecent:salCnt,buyoutPct:ordCnt>0?Math.round(salCnt/ordCnt*100):null,
       initialStock:initial,soldSinceStart:soldSince,
       daysOfSupply:dos,depletionDate:dos?new Date(today.getTime()+dos*864e5).toISOString():null,
-      projLeft:proj,projLeftPct:stock?Math.round(proj/stock*1000)/10:0,requiredDaily:Math.round(req*100)/100,
+      projLeft:proj,projLeftPct:stockFull?Math.round(proj/stockFull*1000)/10:0,requiredDaily:Math.round(req*100)/100,
       deadstock:ds,currentDiscount:cur,recommendedDiscount:rec,
       currentPrice:Math.round(2990*(1-cur/100)),recommendedPrice:Math.round(2990*(1-rec/100)),minPrice:Math.round(2990*(1-maxDisc/100)),
       status:status,sizes:mkSizes(stock,daily,cur)});
@@ -577,19 +578,19 @@ function demoReport(p){
   });
   var curDaily=rows.reduce(function(s,r){return s+r.dailyRate;},0);
   var effDaily=curDaily*BF;  // чистый темп с учётом выкупа
-  var proj=Math.max(0,Math.round(tot-effDaily*daysLeft));
+  var proj=Math.max(0,Math.round(totFull-effDaily*daysLeft));
   // цель ≤target% от НАЧАЛЬНОГО остатка
   var tgtUnits=Math.round(totInit*tgt);
-  var need=Math.max(0,tot-tgtUnits), req=need/daysLeft;
+  var need=Math.max(0,totFull-tgtUnits), req=need/daysLeft;
   var el=2, base=effDaily>0?need/effDaily:0, scen=[];
   [0,5,10,15,20,30].forEach(function(d){
     if(d>0 && (13+d)>maxDisc) return;            // не глубже маржи
     var nd=effDaily*(1+el*d/100); if(nd<=0) return;
-    var dtt=need/nd, pl=Math.max(0,tot-nd*daysLeft);
+    var dtt=need/nd, pl=Math.max(0,totFull-nd*daysLeft);
     scen.push({addDiscount:d,discount:Math.round(13+d),dailyRate:Math.round(nd*100)/100,
       daysToTarget:Math.round(dtt),daysSaved:Math.max(0,Math.round(base-dtt)),
       selloutDate:new Date(today.getTime()+dtt*864e5).toISOString(),
-      projLeftPct:tot?Math.round(pl/tot*1000)/10:0,hitsTarget:dtt<=daysLeft});
+      projLeftPct:totFull?Math.round(pl/totFull*1000)/10:0,hitsTarget:dtt<=daysLeft});
   });
   var recTot=Math.min(maxDisc,38);
   var sizeSum=SZ.map(function(z){var d=szTot[z]||{stock:0,recent:0,proj:0,init:0};var sd=Math.round(d.recent/28*100)/100;
@@ -602,9 +603,9 @@ function demoReport(p){
   var dead=Math.max(0,Math.round(proj-tgtUnits));
   return {title:"Шорты (демо)",seasonEnd:p.seasonEnd,daysLeft:daysLeft,lookbackDays:win,
     periodStart:pStart,periodEnd:pEnd,targetRemainPct:parseFloat(p.targetPct),generatedAt:"демо",
-    summary:{totalStock:tot,initialStock:totInit,soldSinceStart:Math.max(0,totInit-tot),soldRecent:sold,salesRecent:Math.round(sold*0.88),buyoutPct:88,currentDaily:Math.round(curDaily*100)/100,trendPct:6.4,
+    summary:{totalStock:tot,totalFull:totFull,initialStock:totInit,soldSinceStart:Math.max(0,totInit-totFull),soldRecent:sold,salesRecent:Math.round(sold*0.88),buyoutPct:88,currentDaily:Math.round(curDaily*100)/100,trendPct:6.4,
       daysOfSupply:Math.round(totFull/effDaily),depletionDate:new Date(today.getTime()+totFull/effDaily*864e5).toISOString(),
-      requiredDaily:Math.round(req*100)/100,needSell:need,targetFromInitial:true,projLeft:proj,projLeftPct:Math.round(proj/tot*1000)/10,scenarios:scen,sizes:sizeSum,
+      requiredDaily:Math.round(req*100)/100,needSell:need,targetFromInitial:true,projLeft:proj,projLeftPct:Math.round(proj/totFull*1000)/10,scenarios:scen,sizes:sizeSum,
       maxDiscountByMargin:maxDisc,marginLimited:38>maxDisc,costSharePct:Math.round(cs*100),minMarginPct:Math.round(mm*100),
       targetLeftUnits:tgtUnits,deadstock:dead,currentDiscount:13,recommendedDiscount:recTot,
       currentPrice:Math.round(2990*0.87),recommendedPrice:Math.round(2990*(1-recTot/100)),minPrice:Math.round(2990*(1-maxDisc/100)),pricesAvailable:true,
