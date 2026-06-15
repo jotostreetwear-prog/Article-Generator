@@ -105,6 +105,7 @@ tbody tr:hover{ background:var(--surface-2); }
 .recprice{ color:var(--accent-deep); white-space:nowrap; }
 [data-theme="dark"] .recprice{ color:var(--accent); }
 .filtered-out{ display:none !important; }
+tfoot .totalrow td{ font-weight:700; background:var(--surface-2); border-top:2px solid var(--line); position:sticky; bottom:0; }
 .hint-click{ margin:2px 2px 10px; font-size:13px; color:var(--ink-2); }
 .szbtn{ display:inline-block; margin-top:3px; font-size:11px; font-weight:600; color:var(--accent-deep); cursor:pointer; }
 [data-theme="dark"] .szbtn{ color:var(--accent); }
@@ -212,6 +213,7 @@ tr.sizedetail td{ background:var(--surface-2); padding:10px 14px; }
           <th>В неликвид</th><th>Скидка</th><th>Цена сейчас ₽</th><th>Реком. цена ₽<br><span class="sub">под темп</span></th><th>Мин. цена ₽<br><span class="sub">по марже</span></th><th>Статус</th>
         </tr></thead>
         <tbody id="tbody"></tbody>
+        <tfoot id="tfoot"></tfoot>
       </table>
     </div>
     <p id="empty" hidden>Под выбранную категорию данных не нашлось. Проверь, что у токена есть доступ к «Статистике» и что в категории есть остатки.</p>
@@ -352,6 +354,7 @@ function applyArtFilter(){
   } else {
     paintSummary(lastReport.summary, (lastReport.summary.sizes)||[], lastReport, null);
   }
+  renderTotals();
 }
 // Сводка по одному артикулу (для фильтра) — из строки отчёта
 function rowToSummary(r, rep){
@@ -382,6 +385,29 @@ function rowVerdict(r, rep, needSell, targetLeft, initBased){
   if(r.dailyRate<=0) return r.vendorCode+": продаж нет, на складе "+fmt(r.stock)+" шт — нужна скидка ~"+r.recommendedDiscount+"%.";
   if(r.requiredDaily<=r.dailyRate) return r.vendorCode+": идём в графике — при "+r.dailyRate+" шт/день к концу сезона останется ~"+r.projLeftPct+"%, цель ≤"+rep.targetRemainPct+"% от "+basis+" остатка достижима.";
   return r.vendorCode+": не успеваем — сейчас "+r.dailyRate+" шт/день. Чтобы осталось ≤"+rep.targetRemainPct+"% от "+basis+" остатка ("+fmt(targetLeft)+" шт), распродать "+fmt(needSell)+" шт, темп "+r.requiredDaily+" шт/день. Скидка ~"+r.recommendedDiscount+"%"+(r.currentPrice?(", цена "+fmt(r.currentPrice)+"₽→"+fmt(r.recommendedPrice)+"₽"):"")+".";
+}
+// строка «ИТОГО» внизу таблицы — суммы по видимым (с учётом фильтра) артикулам
+function renderTotals(){
+  if(!lastReport){ $("tfoot").innerHTML=""; return; }
+  var v=$("artFilter").value;
+  var rows=(lastReport.rows||[]).filter(function(r){return !v || (r.vendorCode||"")===v;});
+  function sum(k){ return rows.reduce(function(a,r){return a+(Number(r[k])||0);},0); }
+  function r2(x){ return Math.round(x*100)/100; }
+  $("tfoot").innerHTML='<tr class="totalrow">'+
+    '<td>ИТОГО</td>'+
+    '<td><span class="sub">'+rows.length+' арт.</span></td>'+
+    '<td>'+fmt(sum("initialStock"))+'</td>'+
+    '<td><b>'+fmt(sum("stock"))+'</b></td>'+
+    '<td>'+fmt(sum("stockFull"))+'</td>'+
+    '<td>'+fmt(sum("toClient"))+'</td>'+
+    '<td>'+fmt(sum("fromClient"))+'</td>'+
+    '<td>'+r2(sum("dailyRate"))+'</td>'+
+    '<td>—</td><td>—</td>'+
+    '<td>'+fmt(sum("projLeft"))+'</td>'+
+    '<td>'+r2(sum("requiredDaily"))+'</td>'+
+    '<td><b>'+fmt(sum("deadstock"))+'</b></td>'+
+    '<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>'+
+  '</tr>';
 }
 function fillArtFilter(rows){
   var sel=$("artFilter"), prev=sel.value, arts=[], seen={};
