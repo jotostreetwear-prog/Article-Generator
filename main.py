@@ -1484,7 +1484,7 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
                           period_start=None, period_end=None):
     """
     Считает по сезонной категории:
-      • остаток (quantityFull по всем складам),
+      • остаток (quantity — доступно к продаже — по всем складам),
       • темп продаж (заказы/день) за последнее окно и динамику к предыдущему окну,
       • на сколько хватит остатка (days of supply) и дату обнуления,
       • прогноз остатка к концу сезона при текущем темпе,
@@ -1643,10 +1643,9 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         if not _match_seasonal(s, category_code, keywords):
             continue
         nm = s.get("nmId")
-        qty = s.get("quantityFull")
-        if qty is None:
-            qty = (s.get("quantity") or 0) + (s.get("inWayToClient") or 0)
-        qty = qty or 0
+        # quantity = доступно к продаже сейчас (как в кабинете WB).
+        # НЕ quantityFull — он включает inWayToClient (товар уже продан и уезжает).
+        qty = int(s.get("quantity") or 0)
         sz = _norm_size(s.get("techSize"))
         stock_by_nm[nm] = stock_by_nm.get(nm, 0) + qty
         stock_nm_size.setdefault(nm, {})[sz] = stock_nm_size.setdefault(nm, {}).get(sz, 0) + qty
@@ -2134,7 +2133,7 @@ def build_seasonal_report_message(rep):
         "ⓘ Источник: WB Статистика. Темп = заказы после отмён за период "
         f"{_fmt_date_ru(rep.get('periodStart'))}–{_fmt_date_ru(rep.get('periodEnd'))} "
         f"({rep.get('lookbackDays')} дн), они же списывают остаток. "
-        "Остаток = quantityFull по всем складам на сейчас."
+        "Остаток = quantity (доступно к продаже) по всем складам на сейчас."
     )
     return "\n".join(lines)
 

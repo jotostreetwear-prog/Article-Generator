@@ -161,11 +161,7 @@ tr.sizedetail td{ background:var(--surface-2); padding:10px 14px; }
       <input id="targetPct" type="number" min="0" max="100" step="1" value="10" style="width:90px">
     </div>
     <div class="fld">
-      <label for="lookback">Окно, дней</label>
-      <input id="lookback" type="number" min="3" max="180" step="1" value="28" style="width:90px">
-    </div>
-    <div class="fld">
-      <label for="periodStart" title="Если выбрать период — продажи считаются по нему, а «Окно, дней» игнорируется">Период с</label>
+      <label for="periodStart" title="Период анализа продаж. Если не выбрать — берутся последние 28 дней">Период с</label>
       <input id="periodStart" type="date">
     </div>
     <div class="fld">
@@ -290,7 +286,7 @@ var STATUS={ok:["В графике","ok"],accelerate:["Ускорить","accele
 
 function params(){
   var p={ category:$("category").value, seasonEnd:$("seasonEnd").value,
-    targetPct:$("targetPct").value, lookback:$("lookback").value };
+    targetPct:$("targetPct").value };
   var ps=$("periodStart").value, pe=$("periodEnd").value;
   if(ps&&pe){ p.periodStart=ps; p.periodEnd=pe; }
   return p;
@@ -453,7 +449,7 @@ function render(rep){
   });
   $("methodology").innerHTML = "ⓘ Источник: WB Статистика. Темп = заказы после отмён за период "+
     fmtDate(rep.periodStart)+"–"+fmtDate(rep.periodEnd)+" ("+rep.lookbackDays+" дн), они же списывают остаток. "+
-    "Остаток = quantityFull по всем складам на сейчас. «Хватит до», прогноз остатка и неликвид считаются по чистому темпу (заказы × % выкупа) — возвраты возвращаются на склад. Цена — из WB «Цены и скидки», мин. цена — предел по марже. "+
+    "Остаток = quantity (доступно к продаже) по всем складам на сейчас. «Хватит до», прогноз остатка и неликвид считаются по чистому темпу (заказы × % выкупа) — возвраты возвращаются на склад. Цена — из WB «Цены и скидки», мин. цена — предел по марже. "+
     "Артикулов в категории: "+(rep.count!=null?rep.count:(rep.rows||[]).length)+"."+
     (s.pricesAvailable===false?" <b style='color:var(--bad)'>⚠️ Цены не загрузились — у WB-токена нет доступа к категории «Цены и скидки».</b>":"");
   $("empty").hidden = (rep.rows||[]).length>0;
