@@ -1704,6 +1704,7 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     # --- остатки по nmId (+ по размерам, сумма по складам) + мета ---
     stock_by_nm, meta_by_nm = {}, {}
     stock_nm_size = {}   # nm -> {size -> остаток}
+    full_by_nm, toclient_by_nm, fromclient_by_nm = {}, {}, {}  # общее / к клиенту / от клиента
     for s in stocks:
         if not _match_seasonal(s, category_code, keywords):
             continue
@@ -1713,6 +1714,9 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         qty = int(s.get("quantity") or 0)
         sz = _norm_size(s.get("techSize"))
         stock_by_nm[nm] = stock_by_nm.get(nm, 0) + qty
+        full_by_nm[nm] = full_by_nm.get(nm, 0) + int(s.get("quantityFull") or 0)
+        toclient_by_nm[nm] = toclient_by_nm.get(nm, 0) + int(s.get("inWayToClient") or 0)
+        fromclient_by_nm[nm] = fromclient_by_nm.get(nm, 0) + int(s.get("inWayFromClient") or 0)
         stock_nm_size.setdefault(nm, {})[sz] = stock_nm_size.setdefault(nm, {}).get(sz, 0) + qty
         cat_size.setdefault(sz, {"recent": 0, "prev": 0, "stock": 0})["stock"] += qty
         if nm not in meta_by_nm:
@@ -1837,7 +1841,10 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
             "price": meta.get("price"),
             "initialStock": int(init_total) if init_total is not None else None,
             "soldSinceStart": sold_since,
-            "stock": int(stock),
+            "stock": int(stock),                                  # на WB (доступно к продаже)
+            "stockFull": int(full_by_nm.get(nm, 0)),              # общее кол-во
+            "toClient": int(toclient_by_nm.get(nm, 0)),           # в пути к клиенту
+            "fromClient": int(fromclient_by_nm.get(nm, 0)),       # в пути от клиента (возвраты)
             "soldRecent": sold_recent,
             "salesRecent": sales_cnt,
             "buyoutPct": buyout_pct,

@@ -205,7 +205,9 @@ tr.sizedetail td{ background:var(--surface-2); padding:10px 14px; }
     <div class="tablewrap">
       <table>
         <thead><tr>
-          <th>Товар</th><th>Артикул</th><th>Нач. остаток<br><span class="sub">факт</span></th><th>Остаток</th><th>Заказов/день</th><th>Динамика</th>
+          <th>Товар</th><th>Артикул</th><th>Нач. остаток<br><span class="sub">факт</span></th>
+          <th>Остаток<br><span class="sub">на WB</span></th><th>Общее<br><span class="sub">кол-во</span></th><th>К клиенту<br><span class="sub">в пути</span></th><th>От клиента<br><span class="sub">возвраты</span></th>
+          <th>Заказов/день</th><th>Динамика</th>
           <th>Хватит до</th><th>Прогноз остатка</th><th>Нужно/день</th>
           <th>В неликвид</th><th>Скидка</th><th>Цена сейчас ₽</th><th>Реком. цена ₽<br><span class="sub">под темп</span></th><th>Мин. цена ₽<br><span class="sub">по марже</span></th><th>Статус</th>
         </tr></thead>
@@ -406,7 +408,10 @@ function render(rep){
       '<td><div class="artcell">'+(hasSizes?'<span class="caret">▸</span>':"")+thumb(r.nmId)+(r.subject?'<span class="sub">'+r.subject+'</span>':"")+'</div></td>'+
       '<td><span class="art">'+(r.vendorCode||r.nmId||"—")+'</span>'+(hasSizes?'<br><span class="szbtn">▸ размеры</span>':"")+'</td>'+
       '<td>'+initHtml(r.initialStock,r.soldSinceStart)+'</td>'+
-      '<td>'+fmt(r.stock)+'</td>'+
+      '<td><b>'+fmt(r.stock)+'</b></td>'+
+      '<td>'+(r.stockFull!=null?fmt(r.stockFull):'<span class="sub">—</span>')+'</td>'+
+      '<td>'+(r.toClient?fmt(r.toClient):'<span class="sub">—</span>')+'</td>'+
+      '<td>'+(r.fromClient?fmt(r.fromClient):'<span class="sub">—</span>')+'</td>'+
       '<td>'+r.dailyRate+'</td>'+
       '<td>'+trendHtml(r.trendPct)+'</td>'+
       '<td>'+(r.daysOfSupply==null?'<span class="sub">∞</span>':r.daysOfSupply+" дн")+'</td>'+
@@ -422,7 +427,7 @@ function render(rep){
     if(hasSizes){
       var det=document.createElement("tr");
       det.className="sizedetail"; det.hidden=true; det.dataset.art=(r.vendorCode||"");
-      det.innerHTML='<td colspan="15">'+sizeMiniTable(r.sizes)+'</td>';
+      det.innerHTML='<td colspan="18">'+sizeMiniTable(r.sizes)+'</td>';
       tb.appendChild(det);
       tr.addEventListener("click",function(){
         det.hidden=!det.hidden;
@@ -516,7 +521,8 @@ function demoReport(p){
     var dos=eff>0?Math.round(stock/eff):null;
     var initial=Math.round(stock*1.7), soldSince=initial-stock;
     var ordCnt=Math.round(daily*win), salCnt=Math.round(ordCnt*0.88);
-    rows.push({vendorCode:a[0],subject:a[1],size:"M",nmId:200000000+rows.length,stock:stock,dailyRate:daily,trendPct:[ -12,8,24,0,-5][rows.length],
+    var toCl=Math.round(stock*0.15), fromCl=Math.round(stock*0.03);
+    rows.push({vendorCode:a[0],subject:a[1],size:"M",nmId:200000000+rows.length,stock:stock,stockFull:stock+toCl,toClient:toCl,fromClient:fromCl,dailyRate:daily,trendPct:[ -12,8,24,0,-5][rows.length],
       soldRecent:ordCnt,salesRecent:salCnt,buyoutPct:ordCnt>0?Math.round(salCnt/ordCnt*100):null,
       initialStock:initial,soldSinceStart:soldSince,
       daysOfSupply:dos,depletionDate:dos?new Date(today.getTime()+dos*864e5).toISOString():null,
