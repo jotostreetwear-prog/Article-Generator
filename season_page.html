@@ -82,6 +82,8 @@
   .updbar.on{display:flex;}
   .updbar .dot{width:8px; height:8px; border-radius:50%; background:var(--ok); box-shadow:0 0 0 3px var(--ok-bg); animation:pulse 2.4s var(--ease) infinite;}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.45;}}
+  @keyframes rspin{to{transform:rotate(360deg);}}
+  .rspin{display:inline-block;width:13px;height:13px;border-radius:50%;border:2px solid currentColor;border-top-color:transparent;animation:rspin .7s linear infinite;vertical-align:-2px;}
   .updbar label{display:inline-flex; align-items:center; gap:7px; cursor:pointer; user-select:none;}
   .updbar input{accent-color:var(--accent-deep); width:15px; height:15px;}
 
@@ -901,8 +903,13 @@
     return qs;
   }
   function runReport(){
-    $("run").disabled=true; $("run").textContent="…";
-    fetch("/api/wb/season-report?"+reportParams(), {cache:"no-store"})
+    $("run").disabled=true; $("run").innerHTML='<span class="rspin"></span> Загрузка…';
+    $("note").classList.remove("err");
+    $("note").textContent = "⏳ Тяну данные с Wildberries… первый запуск после деплоя может занять до минуты.";
+    var ctl = ("AbortController" in window) ? new AbortController() : null;
+    var killed = false;
+    var timer = setTimeout(function(){ killed=true; if(ctl) ctl.abort(); }, 120000); // 2 мин предохранитель
+    fetch("/api/wb/season-report?"+reportParams(), {cache:"no-store", signal: ctl?ctl.signal:undefined})
       .then(function(r){ return r.json(); })
       .then(function(j){
         if(!(j && j.ok && j.report)) throw new Error(j && j.error ? j.error : "нет данных");
@@ -910,10 +917,10 @@
       })
       .catch(function(e){
         try{ render(demoReport()); $("demo").classList.add("on");
-          $("note").textContent = "WB не ответил ("+e.message+") — показаны демо-данные."; $("note").classList.add("err");
+          $("note").textContent = (killed?"WB долго не отвечает":"WB не ответил")+" ("+(e&&e.message||e)+") — показаны демо-данные. Нажмите «Сформировать» ещё раз."; $("note").classList.add("err");
         }catch(err){ $("note").textContent="Ошибка построения: "+err.message; $("note").classList.add("err"); console.error(err); }
       })
-      .finally(function(){ $("run").disabled=false; $("run").innerHTML="⚡ Сформировать"; });
+      .finally(function(){ clearTimeout(timer); $("run").disabled=false; $("run").innerHTML="⚡ Сформировать"; });
   }
 
   // table row expand
