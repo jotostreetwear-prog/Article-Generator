@@ -2004,6 +2004,10 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         "summary": {
             "totalStock": total_stock,
             "totalFull": total_full,
+            "stock": total_stock,                 # алиасы для дизайна (summary как строка)
+            "stockFull": total_full,
+            "toClient": sum((r.get("toClient") or 0) for r in rows),
+            "fromClient": sum((r.get("fromClient") or 0) for r in rows),
             "initialStock": total_initial,
             "soldSinceStart": total_sold_since,
             "soldRecent": total_recent,
