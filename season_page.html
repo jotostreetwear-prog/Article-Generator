@@ -296,7 +296,7 @@
     <div id="updbar" class="updbar">
       <span class="dot"></span>
       <span id="updinfo">Данные WB обновлены</span>
-      <label><input type="checkbox" id="autorefresh"> автообновление каждые 5 мин</label>
+      <label><input type="checkbox" id="autorefresh" checked> автообновление каждые 5 мин</label>
     </div>
   </div>
 
@@ -914,10 +914,12 @@
     if(ps && pe){ qs += "&periodStart="+ps+"&periodEnd="+pe; }
     return qs;
   }
-  function runReport(){
-    $("run").disabled=true; $("run").innerHTML='<span class="rspin"></span> Загрузка…';
-    $("note").classList.remove("err");
-    $("note").textContent = "⏳ Тяну данные с Wildberries… первый запуск после деплоя может занять до минуты.";
+  function runReport(silent){
+    if(!silent){
+      $("run").disabled=true; $("run").innerHTML='<span class="rspin"></span> Загрузка…';
+      $("note").classList.remove("err");
+      $("note").textContent = "⏳ Тяну данные с Wildberries… первый запуск после деплоя может занять до минуты.";
+    }
     var ctl = ("AbortController" in window) ? new AbortController() : null;
     var killed = false;
     var timer = setTimeout(function(){ killed=true; if(ctl) ctl.abort(); }, 120000); // 2 мин предохранитель
@@ -928,11 +930,12 @@
         render(j); $("demo").classList.remove("on");
       })
       .catch(function(e){
+        if(silent) return;   // тихое автообновление: не трогаем экран при сбое
         try{ render(demoReport()); $("demo").classList.add("on");
           $("note").textContent = (killed?"WB долго не отвечает":"WB не ответил")+" ("+(e&&e.message||e)+") — показаны демо-данные. Нажмите «Сформировать» ещё раз."; $("note").classList.add("err");
         }catch(err){ $("note").textContent="Ошибка построения: "+err.message; $("note").classList.add("err"); console.error(err); }
       })
-      .finally(function(){ clearTimeout(timer); $("run").disabled=false; $("run").innerHTML="⚡ Сформировать"; });
+      .finally(function(){ clearTimeout(timer); if(!silent){ $("run").disabled=false; $("run").innerHTML="⚡ Сформировать"; } });
   }
 
   // table row expand
@@ -951,12 +954,15 @@
     $(id).addEventListener("change", function(){ if(REPORT) runReport(); });
   });
 
-  // autorefresh
+  // autorefresh: интервал держим постоянно, пока стоит галка; обновление — тихое (без спиннера)
   var refTimer=null;
-  $("autorefresh").addEventListener("change", function(){
-    if(this.checked){ refTimer=setInterval(runReport, 5*60*1000); }
-    else if(refTimer){ clearInterval(refTimer); refTimer=null; }
-  });
+  function setAutoRefresh(on){
+    if(refTimer){ clearInterval(refTimer); refTimer=null; }
+    if(on){ refTimer=setInterval(function(){ runReport(true); }, 5*60*1000); }
+    try{ localStorage.setItem("season-autorefresh", on?"1":"0"); }catch(e){}
+  }
+  $("autorefresh").addEventListener("change", function(){ setAutoRefresh(this.checked); });
+  (function initAuto(){ try{ var v=localStorage.getItem("season-autorefresh"); if(v!==null) $("autorefresh").checked = (v==="1"); }catch(e){} })();
 
   /* ---------- theme ---------- */
   function applyTheme(t){
@@ -979,12 +985,13 @@
     function iso(d){ return d.toISOString().slice(0,10); }
     var today=new Date();
     $("seasonEnd").value = iso(new Date(today.getTime()+75*DAY));
-    $("periodEnd").value = iso(today);
-    $("periodStart").value = iso(new Date(today.getTime()-60*DAY));
+    // Период оставляем пустым → сервер берёт стандартное окно (28 дн), которое держится
+    // в тёплом кэше (фоновый прогрев) → отчёт строится мгновенно. Можно выбрать вручную.
   })();
 
   // auto-run once so the page is never empty on open
   runReport();
+  setAutoRefresh($("autorefresh").checked);   // если галка стоит — сразу запускаем автообновление
 })();
 </script>
 </body>
