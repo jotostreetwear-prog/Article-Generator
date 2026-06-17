@@ -234,6 +234,30 @@
     table#postable{min-width:880px; table-layout:auto;}
   }
   @media (max-width:440px){ .hero{grid-template-columns:1fr;} .controls{grid-template-columns:1fr;} }
+  /* ===== Инструкция ===== */
+  .howto{ background:var(--surface); border:1px solid var(--line); border-radius:var(--r); margin:22px 0 0; box-shadow:var(--shadow); overflow:hidden; }
+  .howto>summary{ list-style:none; cursor:pointer; padding:15px 20px; font-weight:700; font-size:15px; display:flex; align-items:center; gap:12px; color:var(--ink); }
+  .howto>summary::-webkit-details-marker{ display:none; }
+  .howto>summary .ic{ font-size:18px; }
+  .howto>summary .tag{ background:var(--accent); color:var(--accent-ink); font-size:10.5px; font-weight:800; padding:3px 9px; border-radius:999px; letter-spacing:.05em; text-transform:uppercase; }
+  .howto>summary .chev{ margin-left:auto; color:var(--ink-3); transition:transform .2s var(--ease); }
+  .howto[open]>summary .chev{ transform:rotate(180deg); }
+  .howto .body{ padding:6px 22px 20px; font-size:14px; line-height:1.65; color:var(--ink-2); border-top:1px solid var(--line); }
+  .howto .body h4{ margin:16px 0 6px; font-size:11.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent-deep); font-weight:800; }
+  html[data-theme="dark"] .howto .body h4{ color:var(--accent); }
+  .howto .body b{ color:var(--ink); }
+  .howto .body ol,.howto .body ul{ margin:6px 0; padding-left:20px; }
+  .howto .body li{ margin:4px 0; }
+  .howto .body .lead{ color:var(--ink); font-size:15px; }
+  /* ===== Типографика под бренд-спеку (наш шрифт: system-ui / Georgia) ===== */
+  .field label{ font-size:11.5px; letter-spacing:.04em; font-weight:600; }   /* .iw-label */
+  .field input,.field select{ font-size:14.5px; }                            /* поле ввода */
+  #run{ font-size:15px; font-weight:600; }                                   /* кнопка */
+  .pill{ font-size:12px; font-weight:600; }                                  /* статус-пилюля */
+  .eyebrow{ font-size:11.5px; letter-spacing:.04em; }                        /* лейбл-уровень */
+  .howto .body{ font-size:15px; }                                            /* body 15/400 */
+  table.grid thead th, table.sizemini thead th{ font-size:13px; font-weight:700; }  /* шапка таблицы 13/700 */
+  table.grid tbody td{ font-size:16px; }                                     /* ячейка таблицы 16/400 (обычные таблицы) */
 </style>
 </head>
 <body>
@@ -250,6 +274,41 @@
     </div>
     <p class="screen-sub">Остатки, темп выкупа и план уценки по сезонной категории. Сколько распродать к концу сезона, каким темпом и под какую скидку — с разбивкой по артикулам и размерам.</p>
   </header>
+
+  <!-- ===== ИНСТРУКЦИЯ ===== -->
+  <details class="howto">
+    <summary><span class="ic">📘</span> Как пользоваться <span class="tag">инструкция</span> <span class="chev">▾</span></summary>
+    <div class="body">
+      <p class="lead">Дашборд считает по сезонной категории: <b>сколько распродать</b> к концу сезона, <b>каким темпом</b> и <b>под какую скидку/цену</b>, чтобы остаток не лёг в неликвид. Данные тянутся из Wildberries автоматически и обновляются каждые 5 минут.</p>
+
+      <h4>Шаги</h4>
+      <ol>
+        <li>Выбери <b>Категорию</b> (по умолчанию «Шорты»). Отчёт строится сам при открытии.</li>
+        <li>Нужен один артикул — выбери его в поле <b>Артикул</b>: все цифры пересчитаются под него.</li>
+        <li><b>Кликни по строке</b> артикула — раскроются размеры и сценарии по цене.</li>
+        <li><b>Период с/по</b> можно не трогать (берётся последнее окно). Задай вручную, если нужен конкретный отрезок.</li>
+        <li>Кнопка <b>«Сформировать»</b> — пересчитать вручную; галка <b>«автообновление»</b> держит данные свежими.</li>
+      </ol>
+
+      <h4>Что значат цифры</h4>
+      <ul>
+        <li><b>4 крупные карточки</b> — главное: сколько распродать, нужный темп, рекомендованная скидка и цена.</li>
+        <li><b>Остаток на ВБ</b> — доступно к продаже сейчас; <b>Общее</b> — со всем в пути (к клиенту / от клиента). Все расчёты идут <b>от общего</b>.</li>
+        <li><b>Темп</b> — заказов в день; <b>% выкупа</b> — какая доля заказов реально выкупается (за 60 дней).</li>
+        <li><b>Хватит до</b> — когда обнулится остаток при текущем <b>чистом темпе</b> (заказы × % выкупа).</li>
+        <li><b>Распродать</b> — сколько надо продать, чтобы к концу сезона осталось ≤ 10% от <b>начального прихода</b> с производства.</li>
+        <li><b>Скидка / Реком. цена</b> — что «вбить», чтобы успеть в срок; <b>Мин. цена</b> — ниже нельзя (упор в маржу).</li>
+        <li><b>Статус</b>: «в графике» — успеваем; «ускорить» — нужна скидка; «завис» — нет продаж; «распродан» — остатка почти нет.</li>
+      </ul>
+
+      <h4>Подсказки</h4>
+      <ul>
+        <li><b>Лаймовая</b> цена — рекомендованная; <span style="color:var(--ok)">зелёный</span> — всё ок, <span style="color:var(--bad)">красный</span> — нужно внимание.</li>
+        <li>Панель «🟢 Данные WB обновлены …» показывает время последней выгрузки.</li>
+        <li>Кнопка ☾/☀ справа снизу — тёмная/светлая тема.</li>
+      </ul>
+    </div>
+  </details>
 
   <!-- ===== CONTROLS ===== -->
   <section class="controls">
