@@ -1815,15 +1815,19 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
             "salesRecent": sales_cnt,
             "buyoutPct": buyout_pct,
             "dailyRate": round(daily, 2),
+            "currentDaily": round(daily, 2),                      # алиас для дизайна (строка как summary)
             "trendPct": trend,
             "daysOfSupply": int(round(dos)) if dos is not None else None,
             "depletionDate": depletion,
             "projLeft": int(round(proj_left)),
             "projLeftPct": proj_left_pct,
             "requiredDaily": round(required_daily, 2),
+            "needSell": int(round(need_sell)),                    # сколько распродать (для сценариев/hero)
             "deadstock": int(deadstock),
             "currentDiscount": int(cur_disc),
             "recommendedDiscount": int(rec_disc),
+            "maxDiscountByMargin": max_disc,                      # потолок по марже (для сценариев)
+            "marginLimited": int(rec_disc) >= max_disc,
             "currentPrice": cur_price,
             "recommendedPrice": rec_price,
             "minPrice": min_price,
