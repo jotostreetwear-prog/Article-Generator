@@ -8,7 +8,10 @@ import schedule
 import httpx
 import psycopg2
 from flask import Flask, request, jsonify, Response
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+# Московский часовой пояс (сервер обычно в UTC) — для отображения времени обновления.
+MSK = timezone(timedelta(hours=3))
 
 import nk_integration as nk  # интеграция с Национальным каталогом (Честный ЗНАК)
 
@@ -2060,9 +2063,10 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     return {
         "title": title,
         "categoryCode": category_code,
-        "generatedAt": datetime.now().strftime("%d.%m.%Y %H:%M"),
-        "dataUpdatedAt": (datetime.fromtimestamp(_WB_DATA_TS).strftime("%H:%M:%S") if _WB_DATA_TS else None),
-        "dataUpdatedIso": (datetime.fromtimestamp(_WB_DATA_TS).isoformat() if _WB_DATA_TS else None),
+        "generatedAt": datetime.now(MSK).strftime("%d.%m.%Y %H:%M") + " МСК",
+        # время показываем в МСК; iso — в UTC (с Z), чтобы браузер верно считал «X назад»
+        "dataUpdatedAt": (datetime.fromtimestamp(_WB_DATA_TS, MSK).strftime("%H:%M:%S") + " МСК" if _WB_DATA_TS else None),
+        "dataUpdatedIso": (datetime.fromtimestamp(_WB_DATA_TS, timezone.utc).isoformat() if _WB_DATA_TS else None),
         "seasonEnd": season_end,
         "daysLeft": days_left,
         "lookbackDays": win,
