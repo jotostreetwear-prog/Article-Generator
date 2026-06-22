@@ -1471,17 +1471,80 @@ def warm_wb_cache():
     today = datetime.now().date()
     # та же дата, что у дефолтного отчёта (окно 28 дн + выкуп 60 дн → от today-60)
     date_from = (today - timedelta(days=max(56, SEASON_BUYOUT_DAYS))).strftime("%Y-%m-%d")
+    fdate_from = (today - timedelta(days=SEASON_BUYOUT_DAYS)).strftime("%Y-%m-%d")
+    ftoday = today.strftime("%Y-%m-%d")
     for name, fn in (
         ("stocks", lambda: fetch_wb_stocks(force=True)),
         ("prices", lambda: fetch_wb_prices_goods(force=True)),
         ("orders", lambda: fetch_wb_orders(date_from, force=True)),
         ("sales",  lambda: fetch_wb_sales(date_from, force=True)),
+        ("funnel", lambda: fetch_wb_funnel(fdate_from, ftoday, force=True)),
     ):
         try:
             fn()
         except Exception as e:
             print(f"warm_wb_cache {name}: {str(e)[:160]}")
     print(f"WB-кэш прогрет в {datetime.now().strftime('%H:%M:%S')}")
+
+WB_ANALYTICS_BASE = "https://seller-analytics-api.wildberries.ru"
+
+def fetch_wb_funnel(date_from, date_to, force=False):
+    """WB «Воронка продаж» (nm-report/detail): по nmID — переходы в карточку, корзина,
+    заказы, выкупы и официальный % выкупа (как в кабинете). Категория доступа «Аналитика».
+    Возвращает {nmID: {...}}; {} если нет доступа/ошибка."""
+    if not WB_API_TOKEN:
+        return {}
+    cache_key = f"funnel:{date_from}:{date_to}"
+    if not force:
+        cached = _wb_cache_get(cache_key)
+        if cached is not None:
+            return cached
+    out = {}
+    page = 1
+    tries = 0
+    try:
+        while page <= 60:
+            r = httpx.post(
+                WB_ANALYTICS_BASE + "/api/v2/nm-report/detail",
+                headers={"Authorization": WB_API_TOKEN, "Content-Type": "application/json"},
+                json={"period": {"begin": date_from, "end": date_to},
+                      "page": page, "timezone": "Europe/Moscow"},
+                timeout=90,
+            )
+            if r.status_code == 429 and tries < 4:   # nm-report жёстко лимитирован
+                tries += 1
+                time.sleep(min(25, 6 * tries))
+                continue
+            if r.status_code >= 400:
+                break
+            data = (r.json() or {}).get("data") or {}
+            for c in (data.get("cards") or []):
+                nm = c.get("nmID")
+                if nm is None:
+                    continue
+                sp = ((c.get("statistics") or {}).get("selectedPeriod")) or {}
+                conv = sp.get("conversions") or {}
+                out[nm] = {
+                    "vendorCode": c.get("vendorCode"),
+                    "views": sp.get("openCardCount"),          # переходы в карточку
+                    "addToCart": sp.get("addToCartCount"),
+                    "orders": sp.get("ordersCount"),
+                    "ordersSum": sp.get("ordersSumRub"),
+                    "buyouts": sp.get("buyoutsCount"),
+                    "buyoutsSum": sp.get("buyoutsSumRub"),
+                    "cancel": sp.get("cancelCount"),
+                    "avgPrice": sp.get("avgPriceRub"),
+                    "cartConv": conv.get("addToCartPercent"),  # конверсия в корзину, %
+                    "orderConv": conv.get("cartToOrderPercent"),  # конверсия в заказ, %
+                    "buyoutPct": conv.get("buyoutsPercent"),   # % выкупа (как в кабинете)
+                }
+            if not data.get("isNextPage"):
+                break
+            page += 1
+    except Exception:
+        return out
+    _wb_cache_set(cache_key, out)
+    return out
 
 def _match_seasonal(rec, category_code, keywords):
     """Запись относится к нужной категории по артикулу J<код>… или по названию предмета."""
@@ -1591,6 +1654,13 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     except Exception:
         sales = []            # лимит/нет доступа — отчёт всё равно строим
         sales_available = False  # % выкупа просто не покажем (вместо ложного 0%)
+
+    # WB «Воронка продаж» (nm-report) — официальные показы/конверсии/% выкупа, как в кабинете
+    try:
+        funnel = fetch_wb_funnel(buyout_start.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
+    except Exception:
+        funnel = {}
+    funnel_available = bool(funnel)
 
     def _norm_size(v):
         sz = str(v or "").strip()
@@ -1702,8 +1772,14 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         sold_recent = recent.get(nm, 0)           # заказы за окно
         sold_prev = prev.get(nm, 0)
         sales_cnt = sales_recent.get(nm, 0) if sales_available else None  # выкупы за окно (показ)
-        buyout_frac_nm = _buyout_frac(nm)                                  # коэффициент за 60 дн
-        buyout_pct = round(buyout_frac_nm * 100) if sales_available else None
+        fdata = funnel.get(nm) or {}                                       # данные воронки по nmID
+        fb_pct = fdata.get("buyoutPct")                                    # % выкупа как в кабинете
+        if fb_pct is not None:                                            # приоритет — воронка
+            buyout_pct = int(round(fb_pct))
+            buyout_frac_nm = min(1.0, max(0.0, fb_pct / 100.0))
+        else:                                                             # фолбэк — наш расчёт
+            buyout_frac_nm = _buyout_frac(nm)
+            buyout_pct = round(buyout_frac_nm * 100) if sales_available else None
         daily = sold_recent / win
         daily_prev = sold_prev / win
 
@@ -1817,6 +1893,14 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
             "soldRecent": sold_recent,
             "salesRecent": sales_cnt,
             "buyoutPct": buyout_pct,
+            # Воронка продаж (WB nm-report) — как в кабинете
+            "views": fdata.get("views"),                # переходы в карточку
+            "addToCart": fdata.get("addToCart"),        # положили в корзину
+            "cartConv": fdata.get("cartConv"),          # конверсия в корзину, %
+            "orderConv": fdata.get("orderConv"),        # конверсия в заказ, %
+            "funnelOrders": fdata.get("orders"),
+            "funnelBuyouts": fdata.get("buyouts"),
+            "funnelAvgPrice": fdata.get("avgPrice"),
             "dailyRate": round(daily, 2),
             "currentDaily": round(daily, 2),                      # алиас для дизайна (строка как summary)
             "trendPct": trend,
@@ -1847,8 +1931,19 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     total_sold_since = max(0, total_initial - total_full) if total_initial is not None else None
     total_recent = sum(r["soldRecent"] for r in rows)
     total_sales = sum((r["salesRecent"] or 0) for r in rows) if sales_available else None
-    # % выкупа по категории — за длинное окно (стабильный), он же используется в чистом темпе
-    total_buyout = round(cat_buyout_frac * 100) if sales_available else None
+    # --- агрегаты воронки по категории (как в кабинете) ---
+    f_orders = sum((r.get("funnelOrders") or 0) for r in rows)
+    f_buyouts = sum((r.get("funnelBuyouts") or 0) for r in rows)
+    total_views = sum((r.get("views") or 0) for r in rows) if funnel_available else None
+    total_addcart = sum((r.get("addToCart") or 0) for r in rows) if funnel_available else None
+    # % выкупа по категории: приоритет — воронка, иначе наш расчёт за длинное окно
+    if funnel_available and f_orders > 0:
+        cat_buyout_frac = min(1.0, f_buyouts / f_orders)
+        total_buyout = round(cat_buyout_frac * 100)
+    else:
+        total_buyout = round(cat_buyout_frac * 100) if sales_available else None
+    cat_cart_conv = round(total_addcart / total_views * 100, 1) if (total_views and total_views > 0) else None
+    cat_order_conv = round(f_orders / total_addcart * 100, 1) if (total_addcart and total_addcart > 0) else None
     total_prev = sum(prev.values())
     cur_daily = total_recent / win
     prev_daily = total_prev / win
@@ -2021,6 +2116,11 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
             "soldRecent": total_recent,
             "salesRecent": total_sales,
             "buyoutPct": total_buyout,
+            "views": total_views,                 # воронка: переходы в карточку
+            "addToCart": total_addcart,           # положили в корзину
+            "cartConv": cat_cart_conv,            # конверсия в корзину, %
+            "orderConv": cat_order_conv,          # конверсия в заказ, %
+            "funnelAvailable": funnel_available,
             "currentDaily": round(cur_daily, 2),
             "trendPct": total_trend,
             "daysOfSupply": dos_total,

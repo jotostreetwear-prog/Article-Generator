@@ -294,7 +294,8 @@
       <ul>
         <li><b>4 крупные карточки</b> — главное: сколько распродать, нужный темп, рекомендованная скидка и цена.</li>
         <li><b>Остаток на ВБ</b> — доступно к продаже сейчас; <b>Общее</b> — со всем в пути (к клиенту / от клиента). Все расчёты идут <b>от общего</b>.</li>
-        <li><b>Темп</b> — заказов в день; <b>% выкупа</b> — какая доля заказов реально выкупается (за 60 дней).</li>
+        <li><b>Темп</b> — заказов в день; <b>% выкупа</b> — из «Воронки продаж» WB (как в кабинете), иначе считаем сами за 60 дней.</li>
+        <li><b>Воронка</b>: переходы в карточку, конверсия в корзину и в заказ — официальные данные WB.</li>
         <li><b>Хватит до</b> — когда обнулится остаток при текущем <b>чистом темпе</b> (заказы × % выкупа).</li>
         <li><b>Распродать</b> — сколько надо продать, чтобы к концу сезона осталось ≤ 10% от <b>начального прихода</b> с производства.</li>
         <li><b>Скидка / Реком. цена</b> — что «вбить», чтобы успеть в срок; <b>Мин. цена</b> — ниже нельзя (упор в маржу).</li>
@@ -540,7 +541,12 @@
     else if(requiredDaily <= dailyRate*1.05) status="ok";
     else status="accelerate";
 
+    // воронка продаж (демо)
+    var _views=base.views||0, _cart=base.addToCart||0;
+    var _cartConv=_views>0?Math.round(_cart/_views*1000)/10:null;
+    var _orderConv=_cart>0?Math.round(base.soldRecent/_cart*1000)/10:null;
     return {
+      views:_views, addToCart:_cart, cartConv:_cartConv, orderConv:_orderConv, funnelAvailable:true,
       stockFull:stockFull, totalFull:stockFull, totalStock:base.stock, initialStock:initialStock,
       stock:base.stock, toClient:base.toClient, fromClient:base.fromClient,
       soldSinceStart:base.soldSinceStart, soldRecent:soldRecent, salesRecent:salesRecent,
@@ -646,9 +652,12 @@
       var salesRecent = Math.round(soldRecent*buyout);
       var trendPct = Math.round((rng()-0.45)*55);
       var currentDiscount = Math.round(18 + rng()*22);
+      var views = Math.round(soldRecent*(9+rng()*7)+60);
+      var addToCart = Math.round(soldRecent*(2.0+rng()*1.4)+10);
       var base = {
         initialStock:initialStock, soldSinceStart:soldSinceStart, stockFull:stockFull, stock:stock,
         toClient:toClient, fromClient:fromClient, soldRecent:soldRecent, salesRecent:salesRecent,
+        views:views, addToCart:addToCart,
         trendPct:trendPct, basePrice:basePrice0+Math.round((rng()-0.5)*600),
         currentDiscount:currentDiscount, costSharePct:34+Math.round(rng()*8), minMarginPct:12+Math.round(rng()*6)
       };
@@ -677,11 +686,12 @@
 
     // aggregate base
     var aggBase = { initialStock:0, soldSinceStart:0, stockFull:0, stock:0, toClient:0, fromClient:0,
-      soldRecent:0, salesRecent:0, trendPct:0, basePrice:0, currentDiscount:0, costSharePct:0, minMarginPct:0 };
+      soldRecent:0, salesRecent:0, views:0, addToCart:0, trendPct:0, basePrice:0, currentDiscount:0, costSharePct:0, minMarginPct:0 };
     rows.forEach(function(r){
       var b=r._base;
       aggBase.initialStock+=b.initialStock; aggBase.soldSinceStart+=b.soldSinceStart; aggBase.stockFull+=b.stockFull;
       aggBase.stock+=b.stock; aggBase.toClient+=b.toClient; aggBase.fromClient+=b.fromClient;
+      aggBase.views+=b.views; aggBase.addToCart+=b.addToCart;
       aggBase.soldRecent+=b.soldRecent; aggBase.salesRecent+=b.salesRecent;
     });
     // weighted price/discount/cost
@@ -813,7 +823,7 @@
       {k:"Начальный остаток", v:nf(s.initialStock), u:"шт", s:"приход с производства"},
       {k:"Остаток (общее)", v:nf(s.stockFull), u:"шт", bar:{val:100-soldPct, cls:"warn"}, s:"распродано "+pct(soldPct)},
       {k:"Остаток на ВБ", v:nf(s.stock), u:"шт", s:"к клиенту "+nf(s.toClient)+" · от "+nf(s.fromClient)},
-      {k:"% выкупа (60 дн)", v:pct(s.buyoutPct), s:"выкупы / заказы"},
+      {k:"% выкупа", v:pct(s.buyoutPct), s:(s.funnelAvailable?"воронка WB":"выкупы / заказы")},
       {k:"Текущий темп", v:nf1(s.currentDaily), u:"шт/д", cls:trendClass, s:"динамика "+trendArrow+" "+pct(Math.abs(s.trendPct))},
       {k:"Хватит до", v:supplyTxt, s:dmy(s.depletionDate), scls:supplyClass},
       {k:"До конца сезона", v:nf(r.daysLeft), u:"дн", s:"к "+dmy(r.seasonEnd)},
@@ -822,6 +832,12 @@
       {k:"Реком. скидка", v:pct(s.recommendedDiscount), s:"сейчас "+pct(s.currentDiscount)},
       {k:"Потолок по марже", v:pct(s.maxDiscountByMargin), s:"мин.цена "+money(s.minPrice), scls:(s.marginLimited?"bad":"")}
     ];
+    // Воронка продаж (WB) — добавляем карточки, если данные есть
+    if(s.views!=null){
+      kpis.push({k:"Переходы в карточку", v:nf(s.views), u:"шт", s:"воронка WB"});
+      kpis.push({k:"Положили в корзину", v:nf(s.addToCart), u:"шт", s:(s.cartConv!=null?"конв. в корзину "+pct(s.cartConv):"воронка WB")});
+      if(s.orderConv!=null) kpis.push({k:"Конверсия в заказ", v:pct(s.orderConv), s:"корзина → заказ"});
+    }
     $("kpis").innerHTML = kpis.map(function(c){
       var v='<div class="v'+(c.cls?(" "+c.cls):"")+'">'+c.v+(c.u?'<span class="u">'+c.u+'</span>':'')+'</div>';
       var bar=c.bar?'<div class="bar '+(c.bar.cls||"")+'"><i style="width:'+clamp(c.bar.val,0,100)+'%"></i></div>':'';
