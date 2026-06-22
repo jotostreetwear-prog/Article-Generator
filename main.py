@@ -1359,22 +1359,43 @@ _WB_DATA_TS = 0.0    # время последней реальной выгру
 _REPORT_CACHE = {}
 _REPORT_TTL = 360    # сек (6 мин); фон пересобирает дефолтные отчёты каждые 5 мин
 
-def cached_report(category, season_end, target_pct, lookback, period_start, period_end,
-                  cost_share=None, min_margin=None, keywords=None, build_if_miss=True):
-    """Готовый отчёт из кэша; собирает заново при промахе. Фон заранее греет дефолты."""
-    sig = f"{category}|{season_end}|{target_pct}|{lookback}|{period_start or ''}|{period_end or ''}"
-    v = _REPORT_CACHE.get(sig)
-    if v and (time.time() - v[0]) < _REPORT_TTL:
-        return v[1]
-    if not build_if_miss:
-        return None
-    rep = build_seasonal_report(
+def _build_report_for(category, season_end, target_pct, lookback, period_start, period_end,
+                      cost_share, min_margin, keywords):
+    return build_seasonal_report(
         category_code=category, keywords=keywords, season_end=season_end,
         target_remain_pct=target_pct, lookback_days=lookback,
         cost_share=cost_share, min_margin=min_margin,
         period_start=period_start, period_end=period_end,
     )
-    _REPORT_CACHE[sig] = (time.time(), rep)
+
+def cached_report(category, season_end, target_pct, lookback, period_start, period_end,
+                  cost_share=None, min_margin=None, keywords=None, build_if_miss=True):
+    """Готовый отчёт из кэша. Stale-while-revalidate: если данные устарели — отдаём
+    их МГНОВЕННО, а свежие пересобираем в фоне. Первая сборка по новому набору — синхронно."""
+    sig = f"{category}|{season_end}|{target_pct}|{lookback}|{period_start or ''}|{period_end or ''}"
+    args = (category, season_end, target_pct, lookback, period_start, period_end, cost_share, min_margin, keywords)
+    v = _REPORT_CACHE.get(sig)
+    now = time.time()
+    if v:
+        ts, rep, refreshing = v
+        if now - ts < _REPORT_TTL:
+            return rep                      # свежий
+        # устарел — отдаём сразу, обновляем в фоне (один поток на ключ)
+        if not refreshing:
+            _REPORT_CACHE[sig] = (ts, rep, True)
+            def _bg():
+                try:
+                    fresh = _build_report_for(*args)
+                    _REPORT_CACHE[sig] = (time.time(), fresh, False)
+                except Exception as e:
+                    print(f"report refresh {sig}: {str(e)[:160]}")
+                    _REPORT_CACHE[sig] = (ts, rep, False)
+            threading.Thread(target=_bg, daemon=True).start()
+        return rep
+    if not build_if_miss:
+        return None
+    rep = _build_report_for(*args)          # первый раз по этому набору — синхронно
+    _REPORT_CACHE[sig] = (time.time(), rep, False)
     return rep
 
 def _wb_cache_get(key):
@@ -1585,9 +1606,10 @@ def warm_wb_cache():
 
 WB_ANALYTICS_BASE = "https://seller-analytics-api.wildberries.ru"
 
-def fetch_wb_funnel(date_from, date_to, force=False):
+def fetch_wb_funnel(date_from, date_to, force=False, cache_only=False):
     """WB «Воронка продаж» (nm-report/detail): по nmID — переходы в карточку, корзина,
     заказы, выкупы и официальный % выкупа (как в кабинете). Категория доступа «Аналитика».
+    cache_only=True — только из кэша (не блокируем сборку отчёта живым запросом).
     Возвращает {nmID: {...}}; {} если нет доступа/ошибка."""
     if not WB_API_TOKEN:
         return {}
@@ -1596,6 +1618,8 @@ def fetch_wb_funnel(date_from, date_to, force=False):
         cached = _wb_cache_get(cache_key)
         if cached is not None:
             return cached
+        if cache_only:
+            return {}
     out = {}
     page = 1
     tries = 0
@@ -1757,7 +1781,7 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
 
     # WB «Воронка продаж» (nm-report) — официальные показы/конверсии/% выкупа, как в кабинете
     try:
-        funnel = fetch_wb_funnel(buyout_start.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
+        funnel = fetch_wb_funnel(buyout_start.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"), cache_only=True)
     except Exception:
         funnel = {}
     funnel_available = bool(funnel)
