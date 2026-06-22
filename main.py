@@ -1572,8 +1572,11 @@ def fetch_wb_funnel(date_from, date_to, force=False):
             r = httpx.post(
                 WB_ANALYTICS_BASE + "/api/v2/nm-report/detail",
                 headers={"Authorization": WB_API_TOKEN, "Content-Type": "application/json"},
-                json={"period": {"begin": date_from, "end": date_to},
-                      "page": page, "timezone": "Europe/Moscow"},
+                json={"brandNames": [], "objectIDs": [], "tagIDs": [], "nmIDs": [],
+                      "timezone": "Europe/Moscow",
+                      "period": {"begin": date_from + " 00:00:00", "end": date_to + " 23:59:59"},
+                      "orderBy": {"field": "ordersSumRub", "mode": "desc"},
+                      "page": page},
                 timeout=90,
             )
             if r.status_code == 429 and tries < 4:   # nm-report жёстко лимитирован
@@ -1738,6 +1741,7 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
     orders_long = {}                  # nm -> заказов за buyout_days (для % выкупа)
     cat_orders_long = 0
     order_meta = {}                   # nm -> {vendorCode, subject} из заказов (для позиций без остатка)
+    order_price = {}                  # nm -> {price, discount, d} — цена из самого свежего заказа
     for o in orders:
         if not _match_seasonal(o, category_code, keywords):
             continue
@@ -1749,6 +1753,12 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         nm = o.get("nmId")
         if nm not in order_meta and o.get("supplierArticle"):
             order_meta[nm] = {"vendorCode": o.get("supplierArticle"), "subject": o.get("subject")}
+        # цена из заказа (Статистика): totalPrice — до скидки, discountPercent — скидка продавца
+        tp = o.get("totalPrice")
+        if tp:
+            op = order_price.get(nm)
+            if op is None or (op.get("d") is None or d >= op["d"]):
+                order_price[nm] = {"price": float(tp), "discount": float(o.get("discountPercent") or 0), "d": d}
         # длинное окно для коэффициента выкупа
         if buyout_start <= d <= today:
             orders_long[nm] = orders_long.get(nm, 0) + 1
@@ -1886,9 +1896,17 @@ def build_seasonal_report(category_code="10", keywords=None, season_end="2026-08
         deadstock = max(0.0, round(proj_left - target_left_units))  # сверх плана ляжет в неликвид
 
         # цена/скидка: приоритет — WB Prices API, фолбэк — поля из остатков
+        # цена: приоритет — WB Prices API; если нет доступа «Цены и скидки» — берём из заказов
+        # (totalPrice/discountPercent, доступно по «Статистике»); фолбэк — поля из остатков
         pinfo = prices.get(nm) or {}
-        base_price = pinfo.get("price") or meta.get("price") or 0
-        cur_disc = pinfo.get("discount") if pinfo.get("discount") is not None else (meta.get("discount") or 0)
+        opr = order_price.get(nm) or {}
+        base_price = pinfo.get("price") or opr.get("price") or meta.get("price") or 0
+        if pinfo.get("discount") is not None:
+            cur_disc = pinfo.get("discount")
+        elif opr.get("discount") is not None:
+            cur_disc = opr.get("discount")
+        else:
+            cur_disc = meta.get("discount") or 0
         rec_disc = cur_disc
         status = "ok"
         if stock_full <= 0:
@@ -2474,8 +2492,11 @@ def api_wb_token_check():
         "content": _ping("https://content-api.wildberries.ru"),         # карточки
         # аналитика — реальный nm-report (воронка)
         "analytics": _probe("POST", "https://seller-analytics-api.wildberries.ru/api/v2/nm-report/detail",
-                            json={"period": {"begin": (_today - timedelta(days=7)).strftime("%Y-%m-%d"),
-                                              "end": _today.strftime("%Y-%m-%d")}, "page": 1}),
+                            json={"brandNames": [], "objectIDs": [], "tagIDs": [], "nmIDs": [],
+                                  "timezone": "Europe/Moscow",
+                                  "period": {"begin": (_today - timedelta(days=7)).strftime("%Y-%m-%d") + " 00:00:00",
+                                             "end": _today.strftime("%Y-%m-%d") + " 23:59:59"},
+                                  "orderBy": {"field": "ordersSumRub", "mode": "desc"}, "page": 1}),
     }
     # Проверка ЗАПИСИ в Контент: безопасный пустой cards/update ([]), ловим read-only
     write = None
