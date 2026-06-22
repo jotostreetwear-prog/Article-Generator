@@ -1355,6 +1355,28 @@ _WB_CACHE = {}
 _WB_CACHE_TTL = 600  # сек (10 мин); фон обновляет данные каждые 5 мин
 _WB_DATA_TS = 0.0    # время последней реальной выгрузки из WB
 
+# Кэш ГОТОВОГО отчёта (после агрегации) — чтобы страница отдавалась мгновенно.
+_REPORT_CACHE = {}
+_REPORT_TTL = 360    # сек (6 мин); фон пересобирает дефолтные отчёты каждые 5 мин
+
+def cached_report(category, season_end, target_pct, lookback, period_start, period_end,
+                  cost_share=None, min_margin=None, keywords=None, build_if_miss=True):
+    """Готовый отчёт из кэша; собирает заново при промахе. Фон заранее греет дефолты."""
+    sig = f"{category}|{season_end}|{target_pct}|{lookback}|{period_start or ''}|{period_end or ''}"
+    v = _REPORT_CACHE.get(sig)
+    if v and (time.time() - v[0]) < _REPORT_TTL:
+        return v[1]
+    if not build_if_miss:
+        return None
+    rep = build_seasonal_report(
+        category_code=category, keywords=keywords, season_end=season_end,
+        target_remain_pct=target_pct, lookback_days=lookback,
+        cost_share=cost_share, min_margin=min_margin,
+        period_start=period_start, period_end=period_end,
+    )
+    _REPORT_CACHE[sig] = (time.time(), rep)
+    return rep
+
 def _wb_cache_get(key):
     v = _WB_CACHE.get(key)
     if v and (time.time() - v[0]) < _WB_CACHE_TTL:
@@ -1550,6 +1572,15 @@ def warm_wb_cache():
             fn()
         except Exception as e:
             print(f"warm_wb_cache {name}: {str(e)[:160]}")
+    # Заранее собираем готовые отчёты по дефолтным параметрам страницы (Шорты/Джинсы),
+    # чтобы /season отдавался мгновенно из кэша готового отчёта.
+    season_end_default = (today + timedelta(days=75)).strftime("%Y-%m-%d")
+    for cat in ("10", "04"):
+        try:
+            _REPORT_CACHE.pop(f"{cat}|{season_end_default}|10.0|14||", None)  # форс-пересборка
+            cached_report(cat, season_end_default, 10.0, 14, None, None)
+        except Exception as e:
+            print(f"warm report {cat}: {str(e)[:160]}")
     print(f"WB-кэш прогрет в {datetime.now().strftime('%H:%M:%S')}")
 
 WB_ANALYTICS_BASE = "https://seller-analytics-api.wildberries.ru"
@@ -2272,11 +2303,9 @@ def api_wb_season_report():
     period_start = (request.args.get("periodStart", "") or "").strip() or None
     period_end = (request.args.get("periodEnd", "") or "").strip() or None
     try:
-        report = build_seasonal_report(
-            category_code=category, keywords=keywords, season_end=season_end,
-            target_remain_pct=target_pct, lookback_days=lookback, elasticity=elasticity,
-            cost_share=cost_share, min_margin=min_margin,
-            period_start=period_start, period_end=period_end,
+        report = cached_report(
+            category, season_end, target_pct, lookback, period_start, period_end,
+            cost_share=cost_share, min_margin=min_margin, keywords=keywords,
         )
         return jsonify({"ok": True, "report": report})
     except Exception as e:
