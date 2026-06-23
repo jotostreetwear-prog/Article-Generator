@@ -568,15 +568,43 @@ def _bind_left_menu_item(handler_url, title, description):
     print(f"Пункт левого меню зарегистрирован: {handler_url} ({title})")
     return result
 
-def register_left_menu():
-    """Левое меню: только «Распродажа сезона».
-    «Карточки WB» убрана — весь раздел (артикулы, карточки, чек-лист) доступен
-    через приложение «Генерация артикулов»."""
+def cleanup_left_menu():
+    """Убирает ДУБЛИ наших пунктов («Карточки WB» / «Распродажа») на старых
+    доменах и пункт «Чек-лист» (теперь он вкладкой внутри). Пункты других
+    приложений (Поставки, Распределение и т.д.) НЕ трогаются."""
+    keep = {(LEFT_MENU_HANDLER_URL or "").rstrip("/"), (SEASON_MENU_HANDLER_URL or "").rstrip("/")}
+    our_titles = ("карточки wb", "распродаж")
+    removed = 0
     try:
-        bx_call("placement.unbind", {"PLACEMENT": "LEFT_MENU", "HANDLER": LEFT_MENU_HANDLER_URL})
-        print(f"Пункт «Карточки WB» убран из меню: {LEFT_MENU_HANDLER_URL}")
+        for pl in (bx_call("placement.get") or []):
+            if not isinstance(pl, dict) or pl.get("placement") != "LEFT_MENU":
+                continue
+            h = pl.get("handler") or ""
+            title = (pl.get("title") or "").lower()
+            remove = False
+            # дубль наших пунктов, указывающий на ДРУГОЙ (старый) домен
+            if any(t in title for t in our_titles) and h.rstrip("/") not in keep:
+                remove = True
+            # пункт «Чек-лист» (теперь вкладка)
+            if "/checklist" in h or "чек-лист" in title or "чек лист" in title:
+                remove = True
+            if remove:
+                try:
+                    bx_call("placement.unbind", {"PLACEMENT": "LEFT_MENU", "HANDLER": h})
+                    removed += 1
+                    print(f"[МЕНЮ] убран дубль/лишний: {h} ({title})")
+                except Exception as e:
+                    print(f"[МЕНЮ] не удалось убрать {h}: {e}")
     except Exception as e:
-        print(f"unbind Карточки WB: {e}")
+        print(f"[МЕНЮ] cleanup placement.get: {e}")
+    return removed
+
+def register_left_menu():
+    """Левое меню: наши пункты «Карточки WB» (объединённый раздел) и
+    «Распродажа сезона». Дубли на старых доменах и «Чек-лист» — убираются."""
+    cleanup_left_menu()
+    _bind_left_menu_item(LEFT_MENU_HANDLER_URL, LEFT_MENU_TITLE,
+                         "Артикулы, карточки и чек-лист Wildberries")
     _bind_left_menu_item(SEASON_MENU_HANDLER_URL, SEASON_MENU_TITLE,
                          "Отчёт по распродаже сезонных товаров (остатки, динамика, скидки)")
     return True
@@ -3033,13 +3061,11 @@ def ensure_left_menu_on_start():
     if not load_oauth():
         print("[МЕНЮ] OAuth ещё не настроен — пункт левого меню привяжется при установке")
         return
-    # «Карточки WB» убираем из меню (дублирует приложение «Генерация артикулов»)
-    try:
-        bx_call("placement.unbind", {"PLACEMENT": "LEFT_MENU", "HANDLER": LEFT_MENU_HANDLER_URL})
-        print(f"[МЕНЮ] убран пункт «Карточки WB»: {LEFT_MENU_HANDLER_URL}")
-    except Exception:
-        pass
+    # убрать дубли наших пунктов на старых доменах и «Чек-лист»
+    cleanup_left_menu()
     items = [
+        (LEFT_MENU_HANDLER_URL, LEFT_MENU_TITLE,
+         "Артикулы, карточки и чек-лист Wildberries"),
         (SEASON_MENU_HANDLER_URL, SEASON_MENU_TITLE,
          "Отчёт по распродаже сезонных товаров (остатки, динамика, скидки)"),
     ]
