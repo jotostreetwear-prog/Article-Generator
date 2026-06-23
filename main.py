@@ -957,6 +957,12 @@ def logo():
 
 @app.route("/", methods=["GET", "POST"])
 def index():
+    # Объединённая страница: вкладки «Генерация артикулов / Редактирование / Создание»
+    cards_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cards_page.html")
+    return Response(load_named_page(cards_path), mimetype="text/html")
+
+@app.route("/articles", methods=["GET"])
+def articles_legacy():
     return Response(load_app_page(), mimetype="text/html")
 
 @app.route("/api/config", methods=["GET"])
