@@ -105,8 +105,8 @@ td textarea{min-height:40px}
     <div class="brand">
       <span class="wordmark">joto</span>
       <div>
-        <h1 class="screen-title">Карточки WB</h1>
-        <div class="muted">Создание и редактирование карточек Wildberries</div>
+        <h1 class="screen-title">Артикулы и карточки WB</h1>
+        <div class="muted">Генерация артикулов, создание и редактирование карточек WB</div>
       </div>
     </div>
     <div class="head-right">
@@ -115,12 +115,56 @@ td textarea{min-height:40px}
   </header>
 
   <div class="tabs">
-    <button class="tab active" data-mode="edit" type="button">✎ Редактирование карточек</button>
+    <button class="tab active" data-mode="article" type="button">🅙 Генерация артикулов</button>
+    <button class="tab" data-mode="edit" type="button">✎ Редактирование карточек</button>
     <button class="tab" data-mode="create" type="button">＋ Создание карточек</button>
   </div>
 
+  <!-- ============ ГЕНЕРАЦИЯ АРТИКУЛОВ ============ -->
+  <section class="panel" id="panel-article">
+    <div class="block">
+      <h2>Генерация артикула</h2>
+      <p class="note" style="margin-top:0">Выберите категорию и цвет — система выдаст следующий свободный артикул JOTO.</p>
+
+      <div class="row" style="margin-top:16px">
+        <div class="field grow2">
+          <label class="label" for="artCategory">Категория</label>
+          <select id="artCategory"><option value="">Загрузка категорий…</option></select>
+          <p class="note" id="artHint">Выберите категорию, чтобы увидеть номер модели</p>
+        </div>
+        <div class="field grow2">
+          <label class="label" for="artColor">Цвет</label>
+          <input id="artColor" type="text" placeholder="чёрный" autocomplete="off">
+        </div>
+      </div>
+
+      <div id="artNewCat" hidden style="margin-top:8px;background:var(--surface-2);border-radius:var(--r);padding:14px">
+        <div class="row">
+          <div class="field"><label class="label" for="artNewCatName">Новая категория</label><input id="artNewCatName" type="text" placeholder="например: бомбер" autocomplete="off"></div>
+          <div class="field"><label class="label" for="artNewCatCode">Код <span class="muted" style="text-transform:none;letter-spacing:0">(2 цифры, можно пусто)</span></label><input id="artNewCatCode" type="text" maxlength="2" placeholder="авто" autocomplete="off"></div>
+          <button class="btn secondary" id="artAddCatBtn" type="button"><span class="spin"></span><span class="lbl">Добавить категорию</span></button>
+        </div>
+        <div class="status" id="artNewCatStatus"></div>
+      </div>
+
+      <button class="btn" id="artDelCatBtn" type="button" hidden style="margin-top:10px;background:transparent;border:1.5px solid #e0483a;color:#e0483a;width:auto;padding:9px 14px;font-size:13px">🗑 Удалить выбранную категорию</button>
+
+      <button class="btn accent" id="artCreateBtn" type="button" style="margin-top:18px;width:100%">
+        <span class="spin"></span><span class="lbl">Создать артикул</span>
+      </button>
+      <div class="status" id="artStatus"></div>
+
+      <div id="artResult" style="display:none;margin-top:18px;border-top:2px solid var(--line-strong);padding-top:16px">
+        <div style="font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-2);font-weight:700">● Артикул создан</div>
+        <div id="artCode" style="font-family:var(--mono);font-weight:600;font-size:34px;margin:12px 0 6px;word-break:break-all"></div>
+        <div class="muted" id="artMeta"></div>
+        <button class="btn accent" id="artCopyBtn" type="button" style="margin-top:14px;width:auto;padding:11px 18px">Скопировать артикул</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ РЕДАКТИРОВАНИЕ ============ -->
-  <section class="panel" id="panel-edit">
+  <section class="panel" id="panel-edit" hidden>
     <div class="block">
       <h2>1 · Выбор карточек</h2>
       <div class="row">
@@ -275,6 +319,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     document.querySelectorAll(".tab").forEach(function(x){x.classList.remove("active");});
     t.classList.add("active");
     var m=t.dataset.mode;
+    $("panel-article").hidden=(m!=="article");
     $("panel-edit").hidden=(m!=="edit");
     $("panel-create").hidden=(m!=="create");
     fit();
@@ -648,6 +693,94 @@ $("createFromFileBtn").addEventListener("click",async function(){
   finally{ spinOn($("createFromFileBtn"),false,"Создать карточки из файла на WB"); fit(); }
 });
 
+
+/* ============================================================
+   ГЕНЕРАЦИЯ АРТИКУЛОВ
+============================================================ */
+var ART_CATS={};
+function artFillSelect(list, selectValue){
+  ART_CATS={};
+  var html='<option value="" disabled'+(selectValue?'':' selected')+'>Выберите категорию</option>';
+  (list||[]).forEach(function(c){
+    ART_CATS[c.value]={title:c.title, code:c.code, custom:!!c.custom};
+    html+='<option value="'+esc(c.value)+'">'+esc(c.title)+' — '+esc(c.code)+'</option>';
+  });
+  html+='<option value="__new__">➕ Новая категория…</option>';
+  $("artCategory").innerHTML=html;
+  if(selectValue) $("artCategory").value=selectValue;
+}
+async function artLoadCategories(selectValue){
+  try{
+    var j=await api("/api/categories");
+    if(j&&j.ok&&j.categories){ artFillSelect(j.categories, selectValue); }
+  }catch(e){}
+  if(selectValue) $("artCategory").dispatchEvent(new Event("change"));
+  fit();
+}
+async function artRefreshHint(){
+  var v=$("artCategory").value;
+  if(!v||v==="__new__"){ $("artHint").textContent="Выберите категорию, чтобы увидеть номер модели"; return; }
+  $("artHint").textContent="Следующий номер модели: …";
+  try{
+    var r=await api("/api/next?category="+encodeURIComponent(v));
+    if(r&&r.ok) $("artHint").innerHTML="Следующий номер модели: <b>"+esc(r.next_number)+"</b>";
+    else $("artHint").textContent="Категория «"+(ART_CATS[v]?ART_CATS[v].title:v)+"»";
+  }catch(e){ $("artHint").textContent=""; }
+  fit();
+}
+$("artCategory").addEventListener("change",function(){
+  var v=$("artCategory").value;
+  if(v==="__new__"){ $("artNewCat").hidden=false; $("artDelCatBtn").hidden=true; $("artHint").textContent=""; fit(); return; }
+  $("artNewCat").hidden=true;
+  $("artDelCatBtn").hidden=!(ART_CATS[v]&&ART_CATS[v].custom);
+  artRefreshHint();
+});
+$("artAddCatBtn").addEventListener("click",async function(){
+  var nm=$("artNewCatName").value.trim();
+  if(!nm){ showStatus($("artNewCatStatus"),false,"Укажите название категории"); return; }
+  spinOn($("artAddCatBtn"),true,"Добавляю…");
+  try{
+    var j=await api("/api/category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:nm,code:$("artNewCatCode").value.trim()})});
+    if(j&&j.ok){ $("artNewCatName").value=""; $("artNewCatCode").value=""; $("artNewCatStatus").className="status"; await artLoadCategories(j.value); }
+    else showStatus($("artNewCatStatus"),false,(j&&j.error)?j.error:"Ошибка");
+  }catch(e){ showStatus($("artNewCatStatus"),false,"Не удалось связаться с сервером"); }
+  finally{ spinOn($("artAddCatBtn"),false,"Добавить категорию"); }
+});
+$("artDelCatBtn").addEventListener("click",async function(){
+  var v=$("artCategory").value, c=ART_CATS[v];
+  if(!c||!c.custom) return;
+  if(!confirm('Удалить категорию «'+c.title+'» (код '+c.code+')? Уже созданные артикулы это не затронет.')) return;
+  $("artDelCatBtn").disabled=true;
+  try{
+    var j=await api("/api/category/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:v,code:c.code})});
+    if(j&&j.ok){ await artLoadCategories(); showStatus($("artStatus"),true,"Категория «"+c.title+"» удалена"); }
+    else showStatus($("artStatus"),false,(j&&j.error)?j.error:"Не удалось удалить");
+  }catch(e){ showStatus($("artStatus"),false,"Не удалось связаться с сервером"); }
+  $("artDelCatBtn").disabled=false; fit();
+});
+$("artCreateBtn").addEventListener("click",async function(){
+  var v=$("artCategory").value;
+  if(!v||v==="__new__"){ showStatus($("artStatus"),false,"Выберите категорию"); return; }
+  var color=$("artColor").value.trim();
+  if(!color){ showStatus($("artStatus"),false,"Укажите цвет"); return; }
+  spinOn($("artCreateBtn"),true,"Создаю…");
+  try{
+    var j=await api("/api/article",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({category:v,color:color})});
+    if(j&&j.ok){
+      $("artStatus").className="status";
+      $("artCode").textContent=j.article;
+      $("artMeta").textContent=(j.category_title||"")+" · "+(j.color||"")+" · модель "+(j.model_number||"");
+      $("artResult").style.display="block";
+      artRefreshHint();
+    } else showStatus($("artStatus"),false,(j&&j.error)?j.error:"Не удалось создать артикул");
+  }catch(e){ showStatus($("artStatus"),false,"Не удалось связаться с сервером"); }
+  finally{ spinOn($("artCreateBtn"),false,"Создать артикул"); fit(); }
+});
+$("artCopyBtn").addEventListener("click",function(){
+  var t=$("artCode").textContent;
+  try{ if(navigator.clipboard) navigator.clipboard.writeText(t); $("artCopyBtn").textContent="Скопировано ✓"; setTimeout(function(){$("artCopyBtn").textContent="Скопировать артикул";},1500); }catch(e){}
+});
+artLoadCategories();
 
 /* тема */
 (function(){
