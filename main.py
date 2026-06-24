@@ -616,13 +616,22 @@ def cleanup_left_menu():
         print(f"[МЕНЮ] cleanup placement.get: {e}")
     return removed
 
-def register_left_menu():
+def register_left_menu(base_url=None):
     """Левое меню: наши пункты «Карточки WB» (объединённый раздел) и
-    «Распродажа сезона». Дубли на старых доменах и «Чек-лист» — убираются."""
+    «Распродажа сезона». Дубли на старых доменах и «Чек-лист» — убираются.
+
+    base_url — адрес приложения; по умолчанию PUBLIC_BASE_URL. Если передан
+    (например, request.host_url при /install или из админки), пункты меню
+    привязываются к ЭТОМУ домену — так меню само «лечится» при переезде на
+    новый домен Railway и не остаётся «осиротевших» пунктов → «Приложение не
+    найдено»."""
+    base = (base_url or PUBLIC_BASE_URL or "").rstrip("/")
+    if not base:
+        raise RuntimeError("Не задан адрес приложения (PUBLIC_BASE_URL)")
     cleanup_left_menu()
-    _bind_left_menu_item(LEFT_MENU_HANDLER_URL, LEFT_MENU_TITLE,
+    _bind_left_menu_item(f"{base}/cards", LEFT_MENU_TITLE,
                          "Артикулы, карточки и чек-лист Wildberries")
-    _bind_left_menu_item(SEASON_MENU_HANDLER_URL, SEASON_MENU_TITLE,
+    _bind_left_menu_item(f"{base}/season", SEASON_MENU_TITLE,
                          "Отчёт по распродаже сезонных товаров (остатки, динамика, скидки)")
     return True
 
@@ -910,7 +919,8 @@ def install():
         except Exception as e:
             print(f"Ошибка регистрации бота при установке: {e}")
         try:
-            register_left_menu()
+            # адрес берём из запроса установки — это и есть домен обработчика приложения
+            register_left_menu(base_url=(request.host_url or "").rstrip("/"))
         except Exception as e:
             print(f"Ошибка регистрации пункта левого меню при установке: {e}")
     else:
@@ -3044,11 +3054,14 @@ def api_bitrix_placements():
 def admin_placement():
     if not BITRIX_CLIENT_SECRET or request.args.get("secret", "") != BITRIX_CLIENT_SECRET:
         return Response("forbidden", status=403)
+    # Адрес берём из самого запроса (домен, где открыли админку) — чтобы меню всегда
+    # привязалось к тому же адресу, что и приложение, даже если PUBLIC_BASE_URL устарел.
+    base = (request.host_url or "").rstrip("/")
     try:
-        register_left_menu()
-        return jsonify({"ok": True, "items": [
-            {"handler": LEFT_MENU_HANDLER_URL, "title": LEFT_MENU_TITLE},
-            {"handler": SEASON_MENU_HANDLER_URL, "title": SEASON_MENU_TITLE},
+        register_left_menu(base_url=base)
+        return jsonify({"ok": True, "boundTo": base, "items": [
+            {"handler": f"{base}/cards", "title": LEFT_MENU_TITLE},
+            {"handler": f"{base}/season", "title": SEASON_MENU_TITLE},
         ]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
