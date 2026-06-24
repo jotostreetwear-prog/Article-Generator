@@ -175,7 +175,6 @@ td textarea{min-height:40px}
       </div>
     </div>
     <div class="head-right">
-      <button id="helpBtn" class="btn-help" type="button">📖 Инструкция</button>
       <button id="theme-toggle" type="button" title="Тема">☾</button>
     </div>
   </header>
@@ -944,7 +943,6 @@ $("artCopyBtn").addEventListener("click",function(){
 artLoadCategories();
 
 /* инструкция */
-$("helpBtn").addEventListener("click",function(){ $("helpOvl").classList.add("show"); });
 $("heroHelp").addEventListener("click",function(){ $("helpOvl").classList.add("show"); });
 $("helpClose").addEventListener("click",function(){ $("helpOvl").classList.remove("show"); });
 $("helpOvl").addEventListener("click",function(e){ if(e.target===this) this.classList.remove("show"); });
