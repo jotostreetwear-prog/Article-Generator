@@ -1282,6 +1282,14 @@ def api_wb_cards():
         max_cards = 1000
     try:
         cards = wb_fetch_cards(text_search=search, limit=100, max_cards=max_cards)
+        # WB textSearch иногда не находит по части артикула — подстрахуемся:
+        # если по поиску пусто, грузим все карточки и фильтруем сами.
+        if search and not cards:
+            q = search.lower()
+            allc = wb_fetch_cards(text_search="", limit=100, max_cards=max(max_cards, 1000))
+            cards = [c for c in allc
+                     if q in (c.get("vendorCode") or "").lower()
+                     or q in (c.get("title") or "").lower()]
         return jsonify({"ok": True, "count": len(cards),
                         "cards": [simplify_card(c) for c in cards]})
     except Exception as e:
