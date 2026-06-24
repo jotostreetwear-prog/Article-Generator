@@ -575,6 +575,23 @@ def cleanup_left_menu():
     keep = {(LEFT_MENU_HANDLER_URL or "").rstrip("/"), (SEASON_MENU_HANDLER_URL or "").rstrip("/")}
     our_titles = ("карточки wb", "распродаж")
     removed = 0
+    # 1) Явные «осиротевшие» пункты со старого сервиса (их нет в placement.get,
+    #    но они висят в меню). Снимаем по точному адресу — они под тем же
+    #    приложением Битрикса (общий CLIENT_ID), поэтому отвязываются.
+    legacy = [
+        "https://web-production-d9c0b.up.railway.app/cards",
+        "https://web-production-d9c0b.up.railway.app/season",
+        "https://joto-ctr-monitor-production.up.railway.app/checklist",
+    ]
+    for base in legacy:
+        for h in (base, base + "/"):
+            if h.rstrip("/") in keep:
+                continue
+            try:
+                bx_call("placement.unbind", {"PLACEMENT": "LEFT_MENU", "HANDLER": h})
+                print(f"[МЕНЮ] снят старый пункт: {h}")
+            except Exception:
+                pass
     try:
         for pl in (bx_call("placement.get") or []):
             if not isinstance(pl, dict) or pl.get("placement") != "LEFT_MENU":
@@ -3020,8 +3037,8 @@ def admin_placement():
     if not BITRIX_CLIENT_SECRET or request.args.get("secret", "") != BITRIX_CLIENT_SECRET:
         return Response("forbidden", status=403)
     try:
-        removed = reset_left_menu()
-        return jsonify({"ok": True, "removed_old": removed, "items": [
+        register_left_menu()
+        return jsonify({"ok": True, "items": [
             {"handler": LEFT_MENU_HANDLER_URL, "title": LEFT_MENU_TITLE},
             {"handler": SEASON_MENU_HANDLER_URL, "title": SEASON_MENU_TITLE},
         ]})
