@@ -176,11 +176,11 @@ def all_categories():
     for value, title in CATEGORY_TITLES.items():
         code = CATEGORIES.get(value)
         if code and code not in seen_codes:
-            items.append({"value": value, "title": title, "code": code})
+            items.append({"value": value, "title": title, "code": code, "custom": False})
             seen_codes.add(code)
     for name, code in db_list_categories():
         if code not in seen_codes:
-            items.append({"value": name, "title": name.capitalize(), "code": code})
+            items.append({"value": name, "title": name.capitalize(), "code": code, "custom": True})
             seen_codes.add(code)
     items.sort(key=lambda x: x["code"])
     return items
@@ -226,6 +226,30 @@ def add_category(name, code=None):
     except Exception as e:
         print(f"Ошибка add_category: {e}")
         return False, "Ошибка сохранения"
+
+def delete_category(name):
+    name = (name or "").strip().lower()
+    if not name:
+        return False, "Укажите название категории"
+    # Встроенные категории удалять нельзя — они заданы в коде
+    if name in CATEGORIES:
+        return False, "Встроенную категорию удалить нельзя"
+    db_names = {n.lower(): code for n, code in db_list_categories()}
+    if name not in db_names:
+        return False, "Категория не найдена"
+    code = db_names[name]
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM categories WHERE lower(name)=%s", (name,))
+        cur.execute("DELETE FROM model_counters WHERE category_code=%s", (code,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True, code
+    except Exception as e:
+        print(f"Ошибка delete_category: {e}")
+        return False, "Ошибка удаления"
 
 # ===================== СЧЁТЧИКИ НОМЕРОВ =====================
 
@@ -544,20 +568,69 @@ def _bind_left_menu_item(handler_url, title, description):
     print(f"Пункт левого меню зарегистрирован: {handler_url} ({title})")
     return result
 
+def cleanup_left_menu():
+    """Убирает ДУБЛИ наших пунктов («Карточки WB» / «Распродажа») на старых
+    доменах и пункт «Чек-лист» (теперь он вкладкой внутри). Пункты других
+    приложений (Поставки, Распределение и т.д.) НЕ трогаются."""
+    keep = {(LEFT_MENU_HANDLER_URL or "").rstrip("/"), (SEASON_MENU_HANDLER_URL or "").rstrip("/")}
+    our_titles = ("карточки wb", "распродаж")
+    removed = 0
+    # 1) Явные «осиротевшие» пункты со старого сервиса (их нет в placement.get,
+    #    но они висят в меню). Снимаем по точному адресу — они под тем же
+    #    приложением Битрикса (общий CLIENT_ID), поэтому отвязываются.
+    legacy = [
+        "https://web-production-d9c0b.up.railway.app/cards",
+        "https://web-production-d9c0b.up.railway.app/season",
+        "https://joto-ctr-monitor-production.up.railway.app/checklist",
+    ]
+    for base in legacy:
+        for h in (base, base + "/"):
+            if h.rstrip("/") in keep:
+                continue
+            try:
+                bx_call("placement.unbind", {"PLACEMENT": "LEFT_MENU", "HANDLER": h})
+                print(f"[МЕНЮ] снят старый пункт: {h}")
+            except Exception:
+                pass
+    try:
+        for pl in (bx_call("placement.get") or []):
+            if not isinstance(pl, dict) or pl.get("placement") != "LEFT_MENU":
+                continue
+            h = pl.get("handler") or ""
+            title = (pl.get("title") or "").lower()
+            remove = False
+            # дубль наших пунктов, указывающий на ДРУГОЙ (старый) домен
+            if any(t in title for t in our_titles) and h.rstrip("/") not in keep:
+                remove = True
+            # пункт «Чек-лист» (теперь вкладка)
+            if "/checklist" in h or "чек-лист" in title or "чек лист" in title:
+                remove = True
+            if remove:
+                try:
+                    bx_call("placement.unbind", {"PLACEMENT": "LEFT_MENU", "HANDLER": h})
+                    removed += 1
+                    print(f"[МЕНЮ] убран дубль/лишний: {h} ({title})")
+                except Exception as e:
+                    print(f"[МЕНЮ] не удалось убрать {h}: {e}")
+    except Exception as e:
+        print(f"[МЕНЮ] cleanup placement.get: {e}")
+    return removed
+
 def register_left_menu(base_url=None):
-    """Добавляет приложение пунктами в левое меню Bitrix24: карточки WB и распродажа.
-    base_url — адрес приложения (по умолчанию PUBLIC_BASE_URL). Перед привязкой сносим
-    ВСЕ старые пункты этого приложения (в т.ч. с прежнего домена), чтобы не было
-    «осиротевших» пунктов → «Приложение не найдено»."""
+    """Левое меню: наши пункты «Карточки WB» (объединённый раздел) и
+    «Распродажа сезона». Дубли на старых доменах и «Чек-лист» — убираются.
+
+    base_url — адрес приложения; по умолчанию PUBLIC_BASE_URL. Если передан
+    (например, request.host_url при /install или из админки), пункты меню
+    привязываются к ЭТОМУ домену — так меню само «лечится» при переезде на
+    новый домен Railway и не остаётся «осиротевших» пунктов → «Приложение не
+    найдено»."""
     base = (base_url or PUBLIC_BASE_URL or "").rstrip("/")
     if not base:
         raise RuntimeError("Не задан адрес приложения (PUBLIC_BASE_URL)")
-    try:
-        bx_call("placement.unbind", {"PLACEMENT": "LEFT_MENU"})  # снести все старые пункты
-    except Exception:
-        pass
+    cleanup_left_menu()
     _bind_left_menu_item(f"{base}/cards", LEFT_MENU_TITLE,
-                         "Массовое создание и редактирование карточек Wildberries")
+                         "Артикулы, карточки и чек-лист Wildberries")
     _bind_left_menu_item(f"{base}/season", SEASON_MENU_TITLE,
                          "Отчёт по распродаже сезонных товаров (остатки, динамика, скидки)")
     return True
@@ -944,6 +1017,12 @@ def logo():
 
 @app.route("/", methods=["GET", "POST"])
 def index():
+    # Объединённая страница: вкладки «Генерация артикулов / Редактирование / Создание»
+    cards_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cards_page.html")
+    return Response(load_named_page(cards_path), mimetype="text/html")
+
+@app.route("/articles", methods=["GET"])
+def articles_legacy():
     return Response(load_app_page(), mimetype="text/html")
 
 @app.route("/api/config", methods=["GET"])
@@ -955,6 +1034,39 @@ def api_config():
 def api_categories():
     return jsonify({"ok": True, "categories": all_categories()})
 
+@app.route("/api/db-check", methods=["GET"])
+def api_db_check():
+    """Диагностика БД: задан ли DATABASE_URL, подключается ли, какие таблицы есть.
+    Креды не раскрываются — только хост."""
+    out = {"database_url_set": bool(DATABASE_URL)}
+    try:
+        m = re.search(r"@([^/:]+)", DATABASE_URL or "")
+        out["host"] = m.group(1) if m else "(не распознан)"
+    except Exception:
+        out["host"] = "(ошибка разбора)"
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name")
+        out["connect"] = True
+        out["tables"] = [r[0] for r in cur.fetchall()]
+        # пробный init, чтобы создать таблицы если их нет
+        cur.close()
+        conn.close()
+    except Exception as e:
+        out["connect"] = False
+        out["error"] = str(e)[:300]
+    return jsonify(out)
+
+@app.route("/api/db-init", methods=["GET"])
+def api_db_init():
+    """Принудительно создаёт таблицы (CREATE TABLE IF NOT EXISTS). Безопасно."""
+    try:
+        init_db()
+        return jsonify({"ok": True, "message": "init_db выполнен"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:300]}), 500
+
 @app.route("/api/category", methods=["POST"])
 def api_add_category():
     data = request.get_json(silent=True) or request.form
@@ -964,6 +1076,15 @@ def api_add_category():
     if not ok:
         return jsonify({"ok": False, "error": result}), 400
     return jsonify({"ok": True, "value": name, "title": name.capitalize(), "code": result})
+
+@app.route("/api/category/delete", methods=["POST"])
+def api_delete_category():
+    data = request.get_json(silent=True) or request.form
+    name = (data.get("name", "") or "").strip().lower()
+    ok, result = delete_category(name)
+    if not ok:
+        return jsonify({"ok": False, "error": result}), 400
+    return jsonify({"ok": True, "value": name, "code": result})
 
 @app.route("/api/next", methods=["GET"])
 def api_next():
@@ -1171,6 +1292,14 @@ def api_wb_cards():
         max_cards = 1000
     try:
         cards = wb_fetch_cards(text_search=search, limit=100, max_cards=max_cards)
+        # WB textSearch иногда не находит по части артикула — подстрахуемся:
+        # если по поиску пусто, грузим все карточки и фильтруем сами.
+        if search and not cards:
+            q = search.lower()
+            allc = wb_fetch_cards(text_search="", limit=100, max_cards=max(max_cards, 1000))
+            cards = [c for c in allc
+                     if q in (c.get("vendorCode") or "").lower()
+                     or q in (c.get("title") or "").lower()]
         return jsonify({"ok": True, "count": len(cards),
                         "cards": [simplify_card(c) for c in cards]})
     except Exception as e:
@@ -2908,6 +3037,19 @@ def admin_register():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+@app.route("/api/bitrix/placements", methods=["GET"])
+def api_bitrix_placements():
+    """Диагностика: список плейсментов, видимых НАШЕМУ приложению Битрикса.
+    Если «Чек-лист» тут есть — значит он под нашим приложением и убираемый;
+    если нет — он от другого приложения, убирать надо в нём."""
+    try:
+        pls = bx_call("placement.get") or []
+        out = [{"placement": p.get("placement"), "handler": p.get("handler"), "title": p.get("title")}
+               for p in pls if isinstance(p, dict)]
+        return jsonify({"ok": True, "count": len(out), "placements": out})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
 @app.route("/admin/bitrix/placement", methods=["GET"])
 def admin_placement():
     if not BITRIX_CLIENT_SECRET or request.args.get("secret", "") != BITRIX_CLIENT_SECRET:
@@ -2970,12 +3112,8 @@ def ensure_left_menu_on_start():
     if not load_oauth():
         print("[МЕНЮ] OAuth ещё не настроен — пункт левого меню привяжется при установке")
         return
-    items = [
-        (LEFT_MENU_HANDLER_URL, LEFT_MENU_TITLE,
-         "Массовое создание и редактирование карточек Wildberries"),
-        (SEASON_MENU_HANDLER_URL, SEASON_MENU_TITLE,
-         "Отчёт по распродаже сезонных товаров (остатки, динамика, скидки)"),
-    ]
+    # убрать дубли наших пунктов на старых доменах и «Чек-лист»
+    cleanup_left_menu()
     try:
         existing = set()
         try:
@@ -2984,20 +3122,40 @@ def ensure_left_menu_on_start():
                     existing.add(pl["handler"].rstrip("/"))
         except Exception as e:
             print(f"[МЕНЮ] placement.get недоступен: {e}")
-        for handler, title, desc in items:
-            if not handler:
-                continue
-            if handler.rstrip("/") in existing:
-                print(f"[МЕНЮ] уже привязан, позиция сохранена: {handler}")
-                continue
+
+        # «Карточки WB» — привязываем только если ОТСУТСТВУЕТ (сохраняем позицию,
+        # заданную перетаскиванием).
+        if LEFT_MENU_HANDLER_URL:
+            if LEFT_MENU_HANDLER_URL.rstrip("/") in existing:
+                print(f"[МЕНЮ] уже привязан, позиция сохранена: {LEFT_MENU_HANDLER_URL}")
+            else:
+                try:
+                    bx_call("placement.bind", {
+                        "PLACEMENT": "LEFT_MENU", "HANDLER": LEFT_MENU_HANDLER_URL,
+                        "TITLE": LEFT_MENU_TITLE,
+                        "DESCRIPTION": "Артикулы, карточки и чек-лист Wildberries",
+                    })
+                    print(f"[МЕНЮ] добавлен пункт: {LEFT_MENU_HANDLER_URL} ({LEFT_MENU_TITLE})")
+                except Exception as e:
+                    print(f"[МЕНЮ] не удалось привязать {LEFT_MENU_HANDLER_URL}: {e}")
+
+        # «Распродажа сезона» — ПРИНУДИТЕЛЬНО пере-привязываем при каждом старте,
+        # чтобы пункт гарантированно вернулся, даже если когда-то отвалился.
+        if SEASON_MENU_HANDLER_URL:
+            try:
+                bx_call("placement.unbind", {
+                    "PLACEMENT": "LEFT_MENU", "HANDLER": SEASON_MENU_HANDLER_URL})
+            except Exception:
+                pass
             try:
                 bx_call("placement.bind", {
-                    "PLACEMENT": "LEFT_MENU", "HANDLER": handler,
-                    "TITLE": title, "DESCRIPTION": desc,
+                    "PLACEMENT": "LEFT_MENU", "HANDLER": SEASON_MENU_HANDLER_URL,
+                    "TITLE": SEASON_MENU_TITLE,
+                    "DESCRIPTION": "Отчёт по распродаже сезонных товаров (остатки, динамика, скидки)",
                 })
-                print(f"[МЕНЮ] добавлен пункт: {handler} ({title})")
+                print(f"[МЕНЮ] восстановлен пункт: {SEASON_MENU_HANDLER_URL} ({SEASON_MENU_TITLE})")
             except Exception as e:
-                print(f"[МЕНЮ] не удалось привязать {handler}: {e}")
+                print(f"[МЕНЮ] не удалось привязать {SEASON_MENU_HANDLER_URL}: {e}")
     except Exception as e:
         print(f"[МЕНЮ] Не удалось проверить пункты левого меню при старте: {e}")
 

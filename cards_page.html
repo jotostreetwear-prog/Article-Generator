@@ -29,21 +29,86 @@
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 body{background:var(--bg);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased;min-height:100vh}
-.stage{width:100%;max-width:1080px;margin:0 auto;padding:26px 20px 60px}
-.head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px;flex-wrap:wrap}
-.brand{display:flex;align-items:center;gap:12px}
-.wordmark{font-style:italic;font-weight:900;font-size:30px;letter-spacing:-.04em;text-transform:lowercase}
-.screen-title{font-family:var(--serif);font-style:italic;font-weight:400;font-size:26px;margin:2px 0 0}
+.stage{width:100%;max-width:1640px;margin:0 auto;padding:24px 28px 60px}
+@media (max-width:560px){.stage{padding:18px 14px 48px}}
+@media (max-width:720px){.hero{flex-direction:column;padding:24px 22px}.hero-title{font-size:25px}.hero-help{align-self:stretch}}
+.head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap;
+  padding-bottom:18px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:14px}
+.brand::before{content:"";width:4px;height:42px;border-radius:3px;background:var(--accent);flex:none}
+.wordmark{font-style:italic;font-weight:900;font-size:34px;letter-spacing:-.045em;text-transform:lowercase;line-height:.9}
+.screen-title{font-family:var(--serif);font-style:italic;font-weight:400;font-size:27px;margin:1px 0 0;line-height:1.05}
 .head-right{display:flex;gap:8px;align-items:center}
-.tabs{display:flex;gap:8px;margin-bottom:22px;flex-wrap:wrap}
-.tab{font-weight:700;font-size:14px;padding:11px 18px;border-radius:var(--r);border:1.5px solid var(--line);
-  background:var(--surface);color:var(--ink-2);cursor:pointer;transition:all .15s var(--ease)}
-.tab.active{background:var(--ink);color:#fff;border-color:var(--ink)}
-[data-theme="dark"] .tab.active{color:#0A0A0A}
+.btn-help{font-weight:700;font-size:13px;padding:9px 14px;border-radius:11px;border:1.5px solid var(--line-strong);
+  background:transparent;color:var(--ink);cursor:pointer;display:inline-flex;align-items:center;gap:7px;
+  transition:background .15s,color .15s}
+.btn-help:hover{background:var(--ink);color:#fff}
+[data-theme="dark"] .btn-help:hover{color:#0A0A0A}
+.ovl{position:fixed;inset:0;background:rgba(11,11,12,.5);z-index:100;display:none;align-items:flex-start;
+  justify-content:center;padding:40px 16px;overflow:auto}
+.ovl.show{display:flex}
+.modal{background:var(--surface);border:1.5px solid var(--line);border-radius:20px;max-width:700px;width:100%;
+  padding:30px;box-shadow:0 30px 80px -30px rgba(0,0,0,.6);animation:mrise .3s var(--ease) both}
+@keyframes mrise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+.modal h2{font-family:var(--serif);font-style:italic;font-weight:400;font-size:27px;margin:0 0 4px}
+.modal .m-sub{color:var(--ink-2);font-size:14px;margin:0 0 22px}
+.m-step{display:flex;gap:14px;padding:15px 0;border-top:1px solid var(--line)}
+.m-step .m-ico{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;font-size:20px;flex:none;
+  background:color-mix(in srgb,var(--accent) 24%, transparent)}
+.m-step .m-tt{font-weight:800;font-size:15px;margin-bottom:3px}
+.m-step .m-dd{font-size:13.5px;color:var(--ink-2);line-height:1.55}
+.m-note{margin-top:18px;font-size:12.5px;color:var(--ink-3);line-height:1.5;background:var(--surface-2);
+  border-radius:12px;padding:13px 15px}
+.tabs{display:inline-flex;gap:4px;margin-bottom:24px;flex-wrap:wrap;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:14px;padding:5px}
+.tab{font-weight:700;font-size:13.5px;padding:10px 16px;border-radius:10px;border:0;
+  background:transparent;color:var(--ink-2);cursor:pointer;transition:all .15s var(--ease);white-space:nowrap}
+.tab:hover{color:var(--ink)}
+.tab.active{background:var(--ink);color:#fff;box-shadow:0 4px 12px -4px rgba(11,11,12,.4)}
+[data-theme="dark"] .tab.active{background:var(--accent);color:#0A0A0A;box-shadow:var(--glow)}
 .panel[hidden]{display:none}
-.block{background:var(--surface);border:1.5px solid var(--line);border-radius:calc(var(--r) + 4px);
-  padding:20px;margin-bottom:18px;box-shadow:var(--shadow)}
-.block h2{font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-2);margin:0 0 14px}
+/* ----- Обзор: hero ----- */
+.hero{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;
+  background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 16%, var(--surface)),var(--surface) 70%);
+  border:1.5px solid var(--line);border-radius:22px;padding:30px 32px;margin-bottom:18px;
+  box-shadow:var(--shadow);position:relative;overflow:hidden}
+.hero::after{content:"";position:absolute;right:-60px;top:-60px;width:220px;height:220px;border-radius:50%;
+  background:radial-gradient(circle,color-mix(in srgb,var(--accent) 30%, transparent),transparent 70%);pointer-events:none}
+.hero-txt{position:relative;z-index:1;max-width:680px}
+.hero-eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-weight:800;color:var(--accent-deep)}
+[data-theme="dark"] .hero-eyebrow{color:var(--accent)}
+.hero-title{font-size:30px;font-weight:800;letter-spacing:-.02em;color:var(--ink);margin:7px 0 10px;line-height:1.1}
+.hero-sub{font-size:14.5px;line-height:1.55;color:var(--ink-2);margin:0}
+.hero-help{position:relative;z-index:1;flex:none;white-space:nowrap;font-family:var(--sans);font-weight:700;font-size:13.5px;
+  padding:11px 16px;border-radius:12px;cursor:pointer;border:1.5px solid var(--line-strong);
+  background:var(--surface);color:var(--ink);transition:transform .14s var(--ease),border-color .15s,box-shadow .15s}
+.hero-help:hover{transform:translateY(-1px);border-color:var(--accent-deep);box-shadow:0 8px 20px -10px rgba(11,11,12,.4)}
+.home-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(248px,1fr));gap:18px}
+.home-card{text-align:left;cursor:pointer;background:var(--surface);border:1.5px solid var(--line);
+  border-radius:18px;padding:24px;box-shadow:var(--shadow);font-family:var(--sans);
+  display:flex;flex-direction:column;gap:10px;position:relative;overflow:hidden;
+  transition:transform .16s var(--ease),border-color .16s,box-shadow .16s}
+.home-card::before{content:"";position:absolute;left:0;top:0;height:100%;width:4px;
+  background:var(--accent);transform:scaleY(0);transform-origin:top;transition:transform .2s var(--ease)}
+.home-card:hover{transform:translateY(-4px);border-color:var(--accent-deep);
+  box-shadow:0 18px 44px -22px rgba(11,11,12,.45)}
+.home-card:hover::before{transform:scaleY(1)}
+[data-theme="dark"] .home-card:hover{border-color:var(--accent);box-shadow:var(--glow)}
+.hc-top{display:flex;align-items:center;margin-bottom:4px}
+.hc-ico{width:50px;height:50px;border-radius:15px;display:grid;place-items:center;font-size:24px;line-height:1;
+  background:color-mix(in srgb,var(--accent) 24%, transparent);color:var(--ink)}
+.hc-title{font-weight:800;font-size:18px;color:var(--ink);letter-spacing:-.01em}
+.hc-sub{font-size:13px;color:var(--ink-2);line-height:1.5;flex:1}
+.hc-go{margin-top:6px;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--accent-deep);
+  display:flex;align-items:center;gap:7px}
+.hc-arrow{display:inline-block;transition:transform .18s var(--ease)}
+.home-card:hover .hc-arrow{transform:translateX(5px)}
+[data-theme="dark"] .hc-go{color:var(--accent)}
+.block{background:var(--surface);border:1.5px solid var(--line);border-radius:18px;
+  padding:22px;margin-bottom:16px;box-shadow:var(--shadow)}
+.block h2{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);font-weight:800;
+  margin:0 0 16px;display:flex;align-items:center;gap:9px}
+.block h2::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
 .field{display:flex;flex-direction:column;gap:7px;flex:1;min-width:170px}
 .field[hidden]{display:none}
@@ -55,11 +120,11 @@ input[type=text],input[type=number],select,textarea{width:100%;font-family:var(-
 textarea{min-height:84px;resize:vertical;font-family:var(--sans)}
 select:focus,input:focus,textarea:focus{border-color:var(--line-strong);
   box-shadow:0 0 0 4px color-mix(in srgb,var(--accent) 26%, transparent)}
-.btn{font-weight:700;font-size:14px;padding:12px 18px;border-radius:var(--r);cursor:pointer;border:1.5px solid var(--ink);
+.btn{font-weight:700;font-size:14px;padding:12px 18px;border-radius:11px;cursor:pointer;border:1.5px solid var(--ink);
   background:var(--ink);color:#fff;display:inline-flex;align-items:center;gap:9px;justify-content:center;
-  transition:transform .14s var(--ease),filter .15s}
+  transition:transform .14s var(--ease),filter .15s,box-shadow .15s}
 [data-theme="dark"] .btn{color:#0A0A0A}
-.btn:hover{transform:translateY(-1px)}
+.btn:hover{transform:translateY(-1px);box-shadow:0 8px 20px -8px rgba(11,11,12,.45)}
 .btn[disabled]{opacity:.55;cursor:default;transform:none}
 .btn.secondary{background:transparent;color:var(--ink);border-color:var(--line-strong)}
 [data-theme="dark"] .btn.secondary{color:var(--ink)}
@@ -106,7 +171,7 @@ td textarea{min-height:40px}
       <span class="wordmark">joto</span>
       <div>
         <h1 class="screen-title">Карточки WB</h1>
-        <div class="muted">Создание и редактирование карточек Wildberries</div>
+        <div class="muted">Артикулы, карточки и чек-лист Wildberries</div>
       </div>
     </div>
     <div class="head-right">
@@ -115,18 +180,102 @@ td textarea{min-height:40px}
   </header>
 
   <div class="tabs">
-    <button class="tab active" data-mode="edit" type="button">✎ Редактирование карточек</button>
+    <button class="tab active" data-mode="home" type="button">🏠 Обзор</button>
+    <button class="tab" data-mode="article" type="button">🅙 Генерация артикулов</button>
+    <button class="tab" data-mode="edit" type="button">✎ Редактирование карточек</button>
     <button class="tab" data-mode="create" type="button">＋ Создание карточек</button>
+    <button class="tab" data-mode="checklist" type="button">✓ Чек-лист</button>
   </div>
 
+  <!-- ============ ОБЗОР ============ -->
+  <section class="panel" id="panel-home">
+    <div class="hero">
+      <div class="hero-txt">
+        <span class="hero-eyebrow">Рабочее место</span>
+        <h1 class="hero-title">С чего начнём? 👋</h1>
+        <p class="hero-sub">Единый центр для карточек Wildberries: придумать артикул, создать карточки из Честного ЗНАка, массово отредактировать и проверить готовность — всё в одном окне.</p>
+      </div>
+      <button class="hero-help" id="heroHelp" type="button">📖 Как пользоваться</button>
+    </div>
+
+    <div class="home-grid">
+      <button class="home-card" data-go="article" type="button">
+        <div class="hc-top"><div class="hc-ico">🅙</div></div>
+        <div class="hc-title">Генерация артикулов</div>
+        <div class="hc-sub">Получить следующий свободный артикул JOTO по категории и цвету.</div>
+        <div class="hc-go"><span>Открыть</span><span class="hc-arrow">→</span></div>
+      </button>
+      <button class="home-card" data-go="create" type="button">
+        <div class="hc-top"><div class="hc-ico">＋</div></div>
+        <div class="hc-title">Создание карточек</div>
+        <div class="hc-sub">Создать карточки на Wildberries из данных Честного ЗНАка — артикул, размер, состав, ТНВЭД и баркоды подтянутся сами.</div>
+        <div class="hc-go"><span>Открыть</span><span class="hc-arrow">→</span></div>
+      </button>
+      <button class="home-card" data-go="edit" type="button">
+        <div class="hc-top"><div class="hc-ico">✎</div></div>
+        <div class="hc-title">Редактирование карточек</div>
+        <div class="hc-sub">Массово менять SEO, название, артикул, категорию, характеристики и цену — изменения уходят прямо на WB.</div>
+        <div class="hc-go"><span>Открыть</span><span class="hc-arrow">→</span></div>
+      </button>
+      <button class="home-card" data-go="checklist" type="button">
+        <div class="hc-top"><div class="hc-ico">✓</div></div>
+        <div class="hc-title">Чек-лист</div>
+        <div class="hc-sub">Проверить готовность карточек: фото, описание, характеристики, баркод и другое.</div>
+        <div class="hc-go"><span>Открыть</span><span class="hc-arrow">→</span></div>
+      </button>
+    </div>
+  </section>
+
+  <!-- ============ ГЕНЕРАЦИЯ АРТИКУЛОВ ============ -->
+  <section class="panel" id="panel-article" hidden>
+    <div class="block">
+      <h2>Генерация артикула</h2>
+      <p class="note" style="margin-top:0">Выберите категорию и цвет — система выдаст следующий свободный артикул JOTO.</p>
+
+      <div class="field" style="margin-top:16px">
+        <label class="label" for="artCategory">Категория</label>
+        <select id="artCategory"><option value="">Загрузка категорий…</option></select>
+        <p class="note" id="artHint">Выберите категорию, чтобы увидеть номер модели</p>
+      </div>
+
+      <button class="btn" id="artDelCatBtn" type="button" hidden style="margin-top:2px;background:transparent;border:1.5px solid #e0483a;color:#e0483a;width:auto;padding:9px 14px;font-size:13px">🗑 Удалить выбранную категорию</button>
+
+      <div id="artNewCat" hidden style="margin-top:12px;background:var(--surface-2);border-radius:var(--r);padding:14px">
+        <div class="row">
+          <div class="field"><label class="label" for="artNewCatName">Новая категория</label><input id="artNewCatName" type="text" placeholder="например: бомбер" autocomplete="off"></div>
+          <div class="field"><label class="label" for="artNewCatCode">Код <span class="muted" style="text-transform:none;letter-spacing:0">(2 цифры, можно пусто)</span></label><input id="artNewCatCode" type="text" maxlength="2" placeholder="авто" autocomplete="off"></div>
+          <button class="btn secondary" id="artAddCatBtn" type="button"><span class="spin"></span><span class="lbl">Добавить категорию</span></button>
+        </div>
+        <div class="status" id="artNewCatStatus"></div>
+      </div>
+
+      <div class="field" style="margin-top:14px">
+        <label class="label" for="artColor">Цвет</label>
+        <input id="artColor" type="text" placeholder="чёрный" autocomplete="off">
+      </div>
+      <button class="btn accent" id="artCreateBtn" type="button" style="margin-top:18px;width:100%">
+        <span class="spin"></span><span class="lbl">Создать артикул</span>
+      </button>
+      <div class="status" id="artStatus"></div>
+
+      <div id="artResult" style="display:none;margin-top:18px;border-top:2px solid var(--line-strong);padding-top:16px">
+        <div style="font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-2);font-weight:700">● Артикул создан</div>
+        <div id="artCode" style="font-family:var(--mono);font-weight:600;font-size:34px;margin:12px 0 6px;word-break:break-all"></div>
+        <div class="muted" id="artMeta"></div>
+        <button class="btn accent" id="artCopyBtn" type="button" style="margin-top:14px;width:auto;padding:11px 18px">Скопировать артикул</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ============ РЕДАКТИРОВАНИЕ ============ -->
-  <section class="panel" id="panel-edit">
+  <section class="panel" id="panel-edit" hidden>
     <div class="block">
       <h2>1 · Выбор карточек</h2>
       <div class="row">
         <div class="field grow2">
-          <label class="label" for="searchInp">Поиск по артикулу / названию (необязательно)</label>
-          <input id="searchInp" type="text" placeholder="например: J05 или худи" autocomplete="off">
+          <label class="label" for="searchInp">Поиск по артикулу / названию</label>
+          <input id="searchInp" type="text" placeholder="например: J05 или худи — затем Enter" autocomplete="off">
+          <div class="note">Введите артикул и нажмите Enter (или кнопку справа) — загрузятся подходящие карточки. Оставьте пусто, чтобы загрузить все.</div>
         </div>
         <button class="btn" id="loadBtn" type="button"><span class="spin"></span><span class="lbl">Загрузить карточки с WB</span></button>
       </div>
@@ -247,6 +396,46 @@ td textarea{min-height:40px}
     </div>
 
   </section>
+
+  <!-- ============ ЧЕК-ЛИСТ (встроенное приложение) ============ -->
+  <section class="panel" id="panel-checklist" hidden>
+    <div class="block" style="padding:0;overflow:hidden">
+      <iframe id="checklistFrame" title="Чек-лист карточек"
+        style="width:100%;height:82vh;min-height:560px;border:0;display:block;border-radius:calc(var(--r) + 4px)"></iframe>
+    </div>
+  </section>
+</div>
+
+<!-- ============ ИНСТРУКЦИЯ ============ -->
+<div class="ovl" id="helpOvl">
+  <div class="modal">
+    <h2>Как пользоваться</h2>
+    <p class="m-sub">Раздел «Карточки WB» — всё про товары на Wildberries в одном месте.</p>
+
+    <div class="m-step"><div class="m-ico">🅙</div><div>
+      <div class="m-tt">Генерация артикулов</div>
+      <div class="m-dd">Выберите категорию и цвет → «Создать артикул» — получите следующий свободный артикул JOTO. Можно добавить свою категорию (➕ Новая категория) и удалить её (🗑).</div>
+    </div></div>
+
+    <div class="m-step"><div class="m-ico">✎</div><div>
+      <div class="m-tt">Редактирование карточек</div>
+      <div class="m-dd">«Загрузить карточки с WB» → отметьте нужные галочками → в списке «Что меняем» выберите поле (SEO-описание, название, артикул, категория, характеристика, цена) → введите значение → «Проверить и отправить» → посмотрите предпросмотр → «Подтвердить». Изменения уходят на Wildberries.</div>
+    </div></div>
+
+    <div class="m-step"><div class="m-ico">＋</div><div>
+      <div class="m-tt">Создание карточек</div>
+      <div class="m-dd">Выберите категорию WB и общие поля → загрузите файл из Честного ЗНАка (после присвоения ГТИНов) → проверьте предпросмотр (артикул, размеры, баркоды, состав, цвет, ТНВЭД подтянутся сами) → «Создать карточки из файла на WB».</div>
+    </div></div>
+
+    <div class="m-step"><div class="m-ico">✓</div><div>
+      <div class="m-tt">Чек-лист</div>
+      <div class="m-dd">Готовность карточек по артикулам: фото, описание, характеристики, баркод, СЕО и т.д. Зелёный квадрат — заполнено, красный — нет. Можно фильтровать и отмечать пункты вручную.</div>
+    </div></div>
+
+    <div class="m-note">⚠️ Для редактирования и создания карточек токен Wildberries (в настройках) должен иметь доступ к категории <b>«Контент»</b> (без галочки «Только на чтение»). Для смены цены — ещё и <b>«Цены и скидки»</b>.</div>
+
+    <button class="btn accent" id="helpClose" type="button" style="margin-top:20px;width:100%">Понятно</button>
+  </div>
 </div>
 
 <script>
@@ -274,11 +463,23 @@ document.querySelectorAll(".tab").forEach(function(t){
   t.addEventListener("click",function(){
     document.querySelectorAll(".tab").forEach(function(x){x.classList.remove("active");});
     t.classList.add("active");
-    var m=t.dataset.mode;
-    $("panel-edit").hidden=(m!=="edit");
-    $("panel-create").hidden=(m!=="create");
-    fit();
+    setMode(t.dataset.mode);
   });
+});
+var CHECKLIST_URL="https://joto-ctr-monitor-production.up.railway.app/checklist";
+function setMode(m){
+  document.querySelectorAll(".tab").forEach(function(x){ x.classList.toggle("active", x.dataset.mode===m); });
+  $("panel-home").hidden=(m!=="home");
+  $("panel-article").hidden=(m!=="article");
+  $("panel-edit").hidden=(m!=="edit");
+  $("panel-create").hidden=(m!=="create");
+  $("panel-checklist").hidden=(m!=="checklist");
+  if(m==="checklist"){ var f=$("checklistFrame"); if(f && !f.src) f.src=CHECKLIST_URL; }
+  fit();
+}
+/* плитки на «Обзоре» открывают нужную вкладку */
+document.querySelectorAll(".home-card").forEach(function(card){
+  card.addEventListener("click",function(){ setMode(card.dataset.go); });
 });
 
 /* ============================================================
@@ -300,6 +501,10 @@ $("loadBtn").addEventListener("click",async function(){
     else buildChangeOptions();
   }catch(e){ alert("Не удалось связаться с сервером"); }
   finally{ spinOn($("loadBtn"),false,"Загрузить карточки с WB"); fit(); }
+});
+/* Enter в поле поиска = загрузить (искать по артикулу/названию на WB) */
+$("searchInp").addEventListener("keydown",function(e){
+  if(e.key==="Enter"){ e.preventDefault(); $("loadBtn").click(); }
 });
 
 function renderPicker(cards){
@@ -648,6 +853,100 @@ $("createFromFileBtn").addEventListener("click",async function(){
   finally{ spinOn($("createFromFileBtn"),false,"Создать карточки из файла на WB"); fit(); }
 });
 
+
+/* ============================================================
+   ГЕНЕРАЦИЯ АРТИКУЛОВ
+============================================================ */
+var ART_CATS={};
+function artFillSelect(list, selectValue){
+  ART_CATS={};
+  var html='<option value="" disabled'+(selectValue?'':' selected')+'>Выберите категорию</option>';
+  (list||[]).forEach(function(c){
+    ART_CATS[c.value]={title:c.title, code:c.code, custom:!!c.custom};
+    html+='<option value="'+esc(c.value)+'">'+esc(c.title)+' — '+esc(c.code)+'</option>';
+  });
+  html+='<option value="__new__">➕ Новая категория…</option>';
+  $("artCategory").innerHTML=html;
+  if(selectValue) $("artCategory").value=selectValue;
+}
+async function artLoadCategories(selectValue){
+  try{
+    var j=await api("/api/categories");
+    if(j&&j.ok&&j.categories){ artFillSelect(j.categories, selectValue); }
+  }catch(e){}
+  if(selectValue) $("artCategory").dispatchEvent(new Event("change"));
+  fit();
+}
+async function artRefreshHint(){
+  var v=$("artCategory").value;
+  if(!v||v==="__new__"){ $("artHint").textContent="Выберите категорию, чтобы увидеть номер модели"; return; }
+  $("artHint").textContent="Следующий номер модели: …";
+  try{
+    var r=await api("/api/next?category="+encodeURIComponent(v));
+    if(r&&r.ok) $("artHint").innerHTML="Следующий номер модели: <b>"+esc(r.next_number)+"</b>";
+    else $("artHint").textContent="Категория «"+(ART_CATS[v]?ART_CATS[v].title:v)+"»";
+  }catch(e){ $("artHint").textContent=""; }
+  fit();
+}
+$("artCategory").addEventListener("change",function(){
+  var v=$("artCategory").value;
+  if(v==="__new__"){ $("artNewCat").hidden=false; $("artDelCatBtn").hidden=true; $("artHint").textContent=""; fit(); return; }
+  $("artNewCat").hidden=true;
+  $("artDelCatBtn").hidden=!(ART_CATS[v]&&ART_CATS[v].custom);
+  artRefreshHint();
+});
+$("artAddCatBtn").addEventListener("click",async function(){
+  var nm=$("artNewCatName").value.trim();
+  if(!nm){ showStatus($("artNewCatStatus"),false,"Укажите название категории"); return; }
+  spinOn($("artAddCatBtn"),true,"Добавляю…");
+  try{
+    var j=await api("/api/category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:nm,code:$("artNewCatCode").value.trim()})});
+    if(j&&j.ok){ $("artNewCatName").value=""; $("artNewCatCode").value=""; $("artNewCatStatus").className="status"; await artLoadCategories(j.value); }
+    else showStatus($("artNewCatStatus"),false,(j&&j.error)?j.error:"Ошибка");
+  }catch(e){ showStatus($("artNewCatStatus"),false,"Не удалось связаться с сервером"); }
+  finally{ spinOn($("artAddCatBtn"),false,"Добавить категорию"); }
+});
+$("artDelCatBtn").addEventListener("click",async function(){
+  var v=$("artCategory").value, c=ART_CATS[v];
+  if(!c||!c.custom) return;
+  if(!confirm('Удалить категорию «'+c.title+'» (код '+c.code+')? Уже созданные артикулы это не затронет.')) return;
+  $("artDelCatBtn").disabled=true;
+  try{
+    var j=await api("/api/category/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:v,code:c.code})});
+    if(j&&j.ok){ await artLoadCategories(); showStatus($("artStatus"),true,"Категория «"+c.title+"» удалена"); }
+    else showStatus($("artStatus"),false,(j&&j.error)?j.error:"Не удалось удалить");
+  }catch(e){ showStatus($("artStatus"),false,"Не удалось связаться с сервером"); }
+  $("artDelCatBtn").disabled=false; fit();
+});
+$("artCreateBtn").addEventListener("click",async function(){
+  var v=$("artCategory").value;
+  if(!v||v==="__new__"){ showStatus($("artStatus"),false,"Выберите категорию"); return; }
+  var color=$("artColor").value.trim();
+  if(!color){ showStatus($("artStatus"),false,"Укажите цвет"); return; }
+  spinOn($("artCreateBtn"),true,"Создаю…");
+  try{
+    var j=await api("/api/article",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({category:v,color:color})});
+    if(j&&j.ok){
+      $("artStatus").className="status";
+      $("artCode").textContent=j.article;
+      $("artMeta").textContent=(j.category_title||"")+" · "+(j.color||"")+" · модель "+(j.model_number||"");
+      $("artResult").style.display="block";
+      artRefreshHint();
+    } else showStatus($("artStatus"),false,(j&&j.error)?j.error:"Не удалось создать артикул");
+  }catch(e){ showStatus($("artStatus"),false,"Не удалось связаться с сервером"); }
+  finally{ spinOn($("artCreateBtn"),false,"Создать артикул"); fit(); }
+});
+$("artCopyBtn").addEventListener("click",function(){
+  var t=$("artCode").textContent;
+  try{ if(navigator.clipboard) navigator.clipboard.writeText(t); $("artCopyBtn").textContent="Скопировано ✓"; setTimeout(function(){$("artCopyBtn").textContent="Скопировать артикул";},1500); }catch(e){}
+});
+artLoadCategories();
+
+/* инструкция */
+$("heroHelp").addEventListener("click",function(){ $("helpOvl").classList.add("show"); });
+$("helpClose").addEventListener("click",function(){ $("helpOvl").classList.remove("show"); });
+$("helpOvl").addEventListener("click",function(e){ if(e.target===this) this.classList.remove("show"); });
+document.addEventListener("keydown",function(e){ if(e.key==="Escape") $("helpOvl").classList.remove("show"); });
 
 /* тема */
 (function(){

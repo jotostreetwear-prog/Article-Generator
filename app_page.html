@@ -70,6 +70,14 @@ input.invalid{ border-color:#e0483a; box-shadow:0 0 0 4px rgba(224,72,58,.16); }
 .hint .num{ font-family:var(--mono); font-weight:600; color:var(--ink); background:var(--surface-2);
   border:1px solid var(--line); padding:1px 8px; border-radius:6px; font-size:12.5px; }
 .hint .num.pulse{ animation:pop .32s var(--ease); }
+.cat-del{ margin-top:10px; align-self:flex-start; display:inline-flex; align-items:center; gap:8px;
+  background:transparent; border:1.5px solid #e0483a; padding:10px 16px; border-radius:var(--r); cursor:pointer;
+  font-family:var(--sans); font-size:13px; font-weight:700; color:#e0483a;
+  transition:background .16s var(--ease), color .16s var(--ease); }
+.cat-del[hidden]{ display:none; }
+.cat-del:hover{ background:#e0483a; color:#fff; }
+.cat-del svg{ width:15px; height:15px; }
+.cat-del[disabled]{ opacity:.5; cursor:default; }
 @keyframes pop{ 0%{transform:scale(.86);opacity:.3} 100%{transform:scale(1);opacity:1} }
 .form-error{ margin:0; font-size:13.5px; color:#e0483a; font-weight:500; display:flex;
   align-items:flex-start; gap:8px; line-height:1.45; }
@@ -175,6 +183,10 @@ input.invalid{ border-color:#e0483a; box-shadow:0 0 0 4px rgba(224,72,58,.16); }
           <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
         </div>
         <p class="hint" id="hint">Выберите категорию, чтобы увидеть номер модели</p>
+        <button class="cat-del" id="delCatBtn" type="button" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m2 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>
+          <span class="cat-del-label">Удалить эту категорию</span>
+        </button>
       </div>
 
       <div class="field" id="newCatField" hidden>
@@ -248,7 +260,7 @@ var form=$("form"), category=$("category"), colorEl=$("color");
 var hint=$("hint"), formError=$("formError"), submit=$("submit");
 var result=$("result"), codeEl=$("code"), copyBtn=$("copy");
 var newCatField=$("newCatField"), newCatName=$("newCatName"), newCatCode=$("newCatCode"),
-    addCatBtn=$("addCatBtn"), newCatError=$("newCatError");
+    addCatBtn=$("addCatBtn"), newCatError=$("newCatError"), delCatBtn=$("delCatBtn");
 
 var DEMO = null;
 var mockState = {};
@@ -258,7 +270,7 @@ function fillSelect(list, selectValue){
   CATS = {};
   var html = '<option value="" disabled' + (selectValue?'':' selected') + '>Выберите категорию</option>';
   list.forEach(function(c){
-    CATS[c.value] = {title:c.title, code:c.code};
+    CATS[c.value] = {title:c.title, code:c.code, custom:!!c.custom};
     html += '<option value="'+c.value+'">'+c.title+' — '+c.code+'</option>';
   });
   html += '<option value="__new__">➕ Новая категория…</option>';
@@ -333,11 +345,37 @@ async function refreshHint(){
   fit();
 }
 
+function syncDelBtn(){
+  var v = category.value;
+  var isCustom = v && v !== "__new__" && CATS[v] && CATS[v].custom;
+  delCatBtn.hidden = !isCustom;
+}
+
 category.addEventListener("change", function(){
   clearError();
-  if (category.value === "__new__"){ newCatField.hidden = false; hint.innerHTML = ""; fit(); return; }
+  if (category.value === "__new__"){ newCatField.hidden = false; delCatBtn.hidden = true; hint.innerHTML = ""; fit(); return; }
   newCatField.hidden = true;
+  syncDelBtn();
   refreshHint();
+});
+
+delCatBtn.addEventListener("click", async function(){
+  var v = category.value;
+  if (!v || !CATS[v] || !CATS[v].custom) return;
+  var title = CATS[v].title || v;
+  if (!confirm('Удалить категорию «' + title + '»? Это действие необратимо.')) return;
+  delCatBtn.disabled = true;
+  delCatBtn.querySelector(".cat-del-label").textContent = "Удаляю…";
+  try{
+    var r = await fetch("/api/category/delete", { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ name:v }) });
+    var j = await r.json();
+    if (!j || !j.ok){ showError((j && j.error) ? j.error : "Не удалось удалить категорию.", category); }
+    else { await loadCategories(); hint.innerHTML = "Категория «" + title + "» удалена"; }
+  }catch(e){ showError("Не удалось связаться с сервером"); }
+  delCatBtn.disabled = false;
+  delCatBtn.querySelector(".cat-del-label").textContent = "Удалить эту категорию";
+  fit();
 });
 
 function clearError(){
