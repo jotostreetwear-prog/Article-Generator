@@ -544,11 +544,21 @@ def _bind_left_menu_item(handler_url, title, description):
     print(f"Пункт левого меню зарегистрирован: {handler_url} ({title})")
     return result
 
-def register_left_menu():
-    """Добавляет приложение пунктами в левое меню Bitrix24: карточки WB и распродажа."""
-    _bind_left_menu_item(LEFT_MENU_HANDLER_URL, LEFT_MENU_TITLE,
+def register_left_menu(base_url=None):
+    """Добавляет приложение пунктами в левое меню Bitrix24: карточки WB и распродажа.
+    base_url — адрес приложения (по умолчанию PUBLIC_BASE_URL). Перед привязкой сносим
+    ВСЕ старые пункты этого приложения (в т.ч. с прежнего домена), чтобы не было
+    «осиротевших» пунктов → «Приложение не найдено»."""
+    base = (base_url or PUBLIC_BASE_URL or "").rstrip("/")
+    if not base:
+        raise RuntimeError("Не задан адрес приложения (PUBLIC_BASE_URL)")
+    try:
+        bx_call("placement.unbind", {"PLACEMENT": "LEFT_MENU"})  # снести все старые пункты
+    except Exception:
+        pass
+    _bind_left_menu_item(f"{base}/cards", LEFT_MENU_TITLE,
                          "Массовое создание и редактирование карточек Wildberries")
-    _bind_left_menu_item(SEASON_MENU_HANDLER_URL, SEASON_MENU_TITLE,
+    _bind_left_menu_item(f"{base}/season", SEASON_MENU_TITLE,
                          "Отчёт по распродаже сезонных товаров (остатки, динамика, скидки)")
     return True
 
@@ -836,7 +846,8 @@ def install():
         except Exception as e:
             print(f"Ошибка регистрации бота при установке: {e}")
         try:
-            register_left_menu()
+            # адрес берём из запроса установки — это и есть домен обработчика приложения
+            register_left_menu(base_url=(request.host_url or "").rstrip("/"))
         except Exception as e:
             print(f"Ошибка регистрации пункта левого меню при установке: {e}")
     else:
@@ -2901,11 +2912,14 @@ def admin_register():
 def admin_placement():
     if not BITRIX_CLIENT_SECRET or request.args.get("secret", "") != BITRIX_CLIENT_SECRET:
         return Response("forbidden", status=403)
+    # Адрес берём из самого запроса (домен, где открыли админку) — чтобы меню всегда
+    # привязалось к тому же адресу, что и приложение, даже если PUBLIC_BASE_URL устарел.
+    base = (request.host_url or "").rstrip("/")
     try:
-        removed = reset_left_menu()
-        return jsonify({"ok": True, "removed_old": removed, "items": [
-            {"handler": LEFT_MENU_HANDLER_URL, "title": LEFT_MENU_TITLE},
-            {"handler": SEASON_MENU_HANDLER_URL, "title": SEASON_MENU_TITLE},
+        register_left_menu(base_url=base)
+        return jsonify({"ok": True, "boundTo": base, "items": [
+            {"handler": f"{base}/cards", "title": LEFT_MENU_TITLE},
+            {"handler": f"{base}/season", "title": SEASON_MENU_TITLE},
         ]})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
