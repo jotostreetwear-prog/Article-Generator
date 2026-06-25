@@ -12,13 +12,13 @@
       нейтрализует тёмную тему (везде показывается светлая).
    ========================================================================= */
 
-@import url('https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Inter:wght@300..800&display=swap');
-
-@font-face{
-  font-family:'WB Hauss VF';
-  src:url('https://static-basket-02.wbbasket.ru/vol20/portal-fonts/latest/assets/als-hauss-vf.b709e7bab16d4dd7d164.ttf') format('truetype-variations');
-  font-weight:1 850; font-style:normal; font-display:swap;
-}
+/* Шрифты — самостоятельно размещены в /static/fonts (без внешних CDN).
+   WB Hauss VF — коммерческий шрифт Wildberries; распространять его файл нельзя,
+   а его CDN недоступен из этого окружения. Поэтому интерфейс использует Inter
+   (штатный fallback дизайн-системы, OFL), таблицы — Lato (OFL). Если появится
+   лицензионный файл WB Hauss — положить его в /static/fonts и добавить @font-face
+   'WB Hauss VF' (он первым в стеке --iw-sans и подхватится автоматически). */
+@import url('/static/fonts/fonts.css');
 
 :root{
   /* ---- Типографика ---- */
@@ -266,3 +266,9 @@ body{
 .btn.accent{ background:var(--primary) !important; border-color:var(--primary) !important; color:#fff !important; }
 /* Вторичная кнопка — белая с рамкой (а не синяя заливка). */
 .btn.secondary{ background:var(--card) !important; color:var(--primary) !important; border-color:var(--card-bd) !important; }
+
+/* Главное действие «отправить/создать на WB» — пурпурное (magenta). */
+#applyBtn, #confirmApply, #createFromFileBtn{
+  background:var(--magenta) !important; border-color:var(--magenta) !important; color:#fff !important;
+}
+#applyBtn:hover, #confirmApply:hover, #createFromFileBtn:hover{ filter:brightness(1.06); }
