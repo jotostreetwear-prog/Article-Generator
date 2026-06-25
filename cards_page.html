@@ -466,7 +466,7 @@ document.querySelectorAll(".tab").forEach(function(t){
     setMode(t.dataset.mode);
   });
 });
-var CHECKLIST_URL="https://joto-ctr-monitor-production.up.railway.app/checklist";
+var CHECKLIST_URL="https://joto-ctr-monitor-production-620e.up.railway.app/checklist";
 function setMode(m){
   document.querySelectorAll(".tab").forEach(function(x){ x.classList.toggle("active", x.dataset.mode===m); });
   $("panel-home").hidden=(m!=="home");
