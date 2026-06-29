@@ -458,13 +458,17 @@ td textarea{min-height:40px}
   <section class="panel" id="panel-recommend" hidden>
     <div class="block">
       <h2>Какие артикулы рекомендовать</h2>
-      <p class="note" style="margin-top:0">Бот по каждому вашему артикулу подбирает, что советовать к нему:
-        <b>похожие</b> (та же категория, другие цвета/модели) и <b>комплект</b> (дополняющие товары — к верху низ, аксессуары и наоборот, по возможности в тон).
-        Введите артикул, чтобы посмотреть рекомендации к нему, или оставьте пусто — покажет по всем.</p>
+      <p class="note" style="margin-top:0">По каждому артикулу: <b>🔗 Сейчас рекомендовано</b> — что уже стоит на карточке,
+        и <b>🧩 Что советует бот</b> — комплект (дополняющие товары к верху низ/аксессуары и наоборот, по возможности в тон).
+        Найдите артикул или выберите категорию из списка.</p>
       <div class="row" style="margin-top:14px">
         <div class="field grow2">
           <label class="label" for="recSearch">Артикул / название (пусто = все)</label>
           <input id="recSearch" type="text" placeholder="например: J05 или худи — затем Enter" autocomplete="off">
+        </div>
+        <div class="field">
+          <label class="label" for="recCat">Категория</label>
+          <select id="recCat"><option value="">Все категории</option></select>
         </div>
         <button class="btn accent" id="recRunBtn" type="button"><span class="spin"></span><span class="lbl">Подобрать рекомендации</span></button>
       </div>
@@ -587,6 +591,30 @@ function recAdvice(c){
   return '<b>Поставьте к этому товару в рекомендации комплект</b> ('+comp.length+' арт.): '+esc(Object.keys(cats).join(", "))+'.'
     +'<div class="muted" style="margin-top:4px">Подобрано в тон ('+esc(c.color||"нейтральные")+'). Например: '+esc(arts)+'.</div>';
 }
+var REC_ALL=[];
+function recFillCats(){
+  var cats={}; REC_ALL.forEach(function(c){ if(c.subjectName) cats[c.subjectName]=(cats[c.subjectName]||0)+1; });
+  var names=Object.keys(cats).sort(function(a,b){return a.localeCompare(b,'ru');});
+  var html='<option value="">Все категории ('+REC_ALL.length+')</option>';
+  names.forEach(function(n){ html+='<option value="'+esc(n)+'">'+esc(n)+' ('+cats[n]+')</option>'; });
+  $("recCat").innerHTML=html;
+}
+function recRenderTable(){
+  var cat=$("recCat").value;
+  var list=cat?REC_ALL.filter(function(c){return (c.subjectName||"")===cat;}):REC_ALL;
+  if(!list.length){ $("recResults").innerHTML='<div class="block"><span class="muted">Нет артикулов для выбранной категории.</span></div>'; return; }
+  var rows=list.map(function(c){
+    return '<tr><td style="white-space:nowrap"><div style="display:flex;gap:10px;align-items:flex-start">'+recThumb(c.photo)
+      +'<div><b class="pick-vc">'+esc(c.vendorCode||"—")+'</b>'
+      +'<div class="muted">'+esc(c.title||"")+'<br>'+esc(c.subjectName||"")+(c.color?(' · '+esc(c.color)):"")+'</div></div></div></td>'
+      +'<td><span class="muted">—</span></td>'
+      +'<td style="min-width:300px">'+recCell(c.complement,"нет дополняющих в каталоге")
+        +'<div style="margin-top:8px">'+recAdvice(c)+'</div></td></tr>';
+  }).join("");
+  $("recResults").innerHTML='<div class="block"><div class="tbl-wrap"><table><thead><tr>'
+    +'<th>Товар</th><th>🔗 Сейчас рекомендовано</th><th>🧩 Что советует бот</th>'
+    +'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+}
 $("recRunBtn").addEventListener("click",async function(){
   spinOn($("recRunBtn"),true,"Подбираю…");
   $("recResults").innerHTML=""; $("recStatus").className="status";
@@ -594,20 +622,14 @@ $("recRunBtn").addEventListener("click",async function(){
     var j=await api("/api/wb/recommendations?search="+encodeURIComponent($("recSearch").value.trim()));
     if(!j.ok){ showStatus($("recStatus"),false,"Ошибка WB: "+(j.error||"")); return; }
     if((j.count||0)===0){ showStatus($("recStatus"),false,"Артикулы не найдены"); return; }
-    showStatus($("recStatus"),true,"Подобрано по "+j.count+" артикул(ам) из каталога ("+(j.total_catalog||j.count)+" карточек).");
-    var rows=j.cards.map(function(c){
-      return '<tr><td style="white-space:nowrap"><div style="display:flex;gap:10px;align-items:flex-start">'+recThumb(c.photo)
-        +'<div><b class="pick-vc">'+esc(c.vendorCode||"—")+'</b>'
-        +'<div class="muted">'+esc(c.title||"")+'<br>'+esc(c.subjectName||"")+(c.color?(' · '+esc(c.color)):"")+'</div></div></div></td>'
-        +'<td>'+recCell(c.complement,"нет дополняющих в каталоге")+'</td>'
-        +'<td style="min-width:240px">'+recAdvice(c)+'</td></tr>';
-    }).join("");
-    $("recResults").innerHTML='<div class="block"><div class="tbl-wrap"><table><thead><tr>'
-      +'<th>Товар</th><th>🧩 Комплект — рекомендуемые артикулы</th><th>💬 Что советует бот</th>'
-      +'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+    REC_ALL=j.cards||[];
+    recFillCats();
+    showStatus($("recStatus"),true,"Подобрано по "+j.count+" артикул(ам) из каталога ("+(j.total_catalog||j.count)+" карточек). Можно отфильтровать по категории.");
+    recRenderTable();
   }catch(e){ showStatus($("recStatus"),false,"Не удалось связаться с сервером"); }
   finally{ spinOn($("recRunBtn"),false,"Подобрать рекомендации"); fit(); }
 });
+$("recCat").addEventListener("change",function(){ if(REC_ALL.length) recRenderTable(); });
 $("recSearch").addEventListener("keydown",function(e){ if(e.key==="Enter"){ e.preventDefault(); $("recRunBtn").click(); } });
 
 /* ============================================================
