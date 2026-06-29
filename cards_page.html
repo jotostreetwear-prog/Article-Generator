@@ -707,26 +707,30 @@ function recSaveStatus(vc,status){
     body:JSON.stringify({vendorCode:vc,status:status,by:CURRENT_USER})}).catch(function(){});
 }
 /* По «Согласовано» — бот ставит комплект бота в рекомендации карточки на WB. */
+function recMetaSet(meta,html){ if(meta) meta.innerHTML=html; }
+/* По «Согласовано» бот сразу ставит комплект на карточку WB. Без confirm
+   (в iframe Битрикса он блокируется) — результат показываем прямо в строке. */
 async function recApplyToWb(vc, sel, meta){
   var card=REC_ALL.filter(function(c){return c.vendorCode===vc;})[0];
-  if(!card||!card.nmID) return;
+  if(!card||!card.nmID){ recMetaSet(meta,'<span style="color:#B42318">нет nmID карточки</span>'); return; }
   var recom=(card.complement||[]).map(function(x){return x.nmID;}).filter(Boolean);
-  if(!recom.length){ showStatus($("recStatus"),false,"У «"+vc+"» бот не подобрал комплект — нечего ставить."); return; }
-  if(!confirm("Поставить рекомендации бота ("+recom.length+" шт.) на карточку «"+vc+"» на Wildberries?")) return;
+  if(!recom.length){ recMetaSet(meta,'<span style="color:#9A6700">бот не подобрал комплект — нечего ставить</span>'); return; }
+  recMetaSet(meta,'<span class="muted">ставлю на WB…</span>');
   try{
     var j=await api("/api/wb/recom-set",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({nmID:card.nmID, recom:recom})});
-    if(j.ok){
+    if(j&&j.ok){
       var now=Math.floor(Date.now()/1000);
       sel.value="wb"; recStatusStyle(sel);
       REC_STATUS_MAP[vc]={status:"wb",by:CURRENT_USER,at:now};
-      if(meta) meta.innerHTML=recMetaText(REC_STATUS_MAP[vc]);
+      recMetaSet(meta,recMetaText(REC_STATUS_MAP[vc])+' · <span style="color:#15803D">✓ на WB ('+(j.count||recom.length)+')</span>');
       recSaveStatus(vc,"wb");
       showStatus($("recStatus"),true,"Рекомендации поставлены на WB для «"+vc+"» ("+(j.count||recom.length)+" шт.).");
     } else {
-      showStatus($("recStatus"),false,"WB: "+(j.error||"не удалось поставить рекомендации"));
+      recMetaSet(meta,'<span style="color:#B42318">WB: '+esc((j&&j.error)||"ошибка")+'</span>');
+      showStatus($("recStatus"),false,"WB: "+((j&&j.error)||"не удалось поставить рекомендации"));
     }
-  }catch(e){ showStatus($("recStatus"),false,"Не удалось связаться с сервером"); }
+  }catch(e){ recMetaSet(meta,'<span style="color:#B42318">нет связи с сервером</span>'); }
 }
 /* Массовые действия: добавить артикул в рекомендации / очистить. */
 $("recBulkAddBtn").addEventListener("click",async function(){
