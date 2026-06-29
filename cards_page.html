@@ -393,8 +393,8 @@ td textarea{min-height:40px}
       </div>
     </div>
 
-    <div class="block">
-      <h2>1 · Категория и общие поля</h2>
+    <div class="block" id="nkBlock" style="border-color:var(--accent)">
+      <h2>1 · Создание из Честного ЗНАка (автоматически)</h2>
       <div class="row">
         <div class="field grow2">
           <label class="label" for="subjSearch">Категория WB</label>
@@ -417,11 +417,7 @@ td textarea{min-height:40px}
         <div class="field"><label class="label" for="cPrice">Цена, ₽</label><input id="cPrice" type="number" value="2990"></div>
         <div class="field"><label class="label" for="cSize">Размер</label><input id="cSize" type="text" value="0" placeholder="0 = безразмерный"></div>
       </div>
-    </div>
-
-    <div class="block" id="nkBlock" style="border-color:var(--accent)">
-      <h2>2 · Создание из Честного ЗНАка (автоматически)</h2>
-      <p class="note" style="margin-top:0">Загрузите Excel-файл из ЧЗ (после присвоения ГТИНов) — по каждому артикулу
+      <p class="note" style="margin-top:14px">Загрузите Excel-файл из ЧЗ (после присвоения ГТИНов) — по каждому артикулу
         автоматически подтянутся <b>размеры, баркоды (ГТИН), состав, цвет, ТНВЭД и наименование</b>.
         Состав, цвет и ТНВЭД сами проставятся в характеристики карточки.</p>
 
@@ -442,11 +438,11 @@ td textarea{min-height:40px}
         </button>
         <div class="status" id="fileCreateStatus"></div>
       </div>
-      <p class="note">Перед созданием выберите категорию WB в блоке 1.</p>
+      <p class="note">Перед созданием заполните категорию WB и общие поля выше.</p>
     </div>
 
     <div class="block" id="charcsBlock" hidden>
-      <h2>3 · Доп. характеристики (необязательно)</h2>
+      <h2>2 · Доп. характеристики (необязательно)</h2>
       <p class="note" style="margin-top:0">Состав, цвет и ТНВЭД подтягиваются из файла автоматически. Здесь можно
         добавить недостающие обязательные характеристики категории (применятся ко всем карточкам).</p>
       <button class="btn secondary sm" id="loadCharcsBtn" type="button" style="margin-top:8px"><span class="spin"></span><span class="lbl">Загрузить характеристики категории</span></button>
