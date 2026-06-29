@@ -376,6 +376,7 @@ td textarea{min-height:40px}
             <button class="btn secondary" id="subjSearchBtn" type="button"><span class="spin"></span><span class="lbl">Найти</span></button>
           </div>
           <select id="createSubj" style="margin-top:8px"><option value="">— сначала найдите категорию —</option></select>
+          <div id="subjWarn" class="status" style="display:none;margin-top:6px"></div>
         </div>
         <div class="field">
           <label class="label" for="cBrand">Бренд</label>
@@ -399,6 +400,7 @@ td textarea{min-height:40px}
         <div class="row" style="margin-top:6px">
           <input type="file" id="nkFile" accept=".xlsx" style="flex:1;min-width:220px">
           <button class="btn secondary" id="nkFileBtn" type="button"><span class="spin"></span><span class="lbl">Загрузить файл</span></button>
+          <button class="btn secondary" id="nkClearBtn" type="button" style="display:none">Удалить файл</button>
         </div>
         <div class="status" id="nkFileResult"></div>
         <div id="filePreview" style="margin-top:12px"></div>
@@ -562,6 +564,7 @@ function setMode(m){
   $("panel-checklist").hidden=(m!=="checklist");
   if(m==="checklist"){ var f=$("checklistFrame"); if(f && !f.src) f.src=CHECKLIST_URL; }
   if(m==="recommend" && !REC_ALL.length && !REC_LOADING){ loadRecommendations(); }
+  if(m==="create" && BRAND_SUBJECTS===null && !BRAND_SUBJ_LOADING){ loadBrandSubjects(); }
   fit();
 }
 /* плитки на «Обзоре» открывают нужную вкладку */
@@ -995,7 +998,38 @@ $("subjSearch").addEventListener("keydown",function(e){
 $("createSubj").addEventListener("change",function(){
   $("charcsBlock").hidden=!$("createSubj").value;
   $("charcsBox").innerHTML="";
+  checkSubjBrand();
 });
+
+/* ---- Подсветка категории, которой у бренда JOTO ещё нет ---- */
+var BRAND_SUBJECTS=null; // Set из subjectID (строки), в которых у нас уже есть карточки
+var BRAND_SUBJ_LOADING=false;
+async function loadBrandSubjects(){
+  BRAND_SUBJ_LOADING=true;
+  try{
+    var j=await api("/api/wb/brand-subjects");
+    if(j&&j.ok&&j.subjects){
+      BRAND_SUBJECTS=new Set(j.subjects.map(function(s){return String(s.subjectID);}));
+    } else { BRAND_SUBJECTS=new Set(); }
+  }catch(e){ BRAND_SUBJECTS=new Set(); }
+  BRAND_SUBJ_LOADING=false;
+  checkSubjBrand(); // если категория уже выбрана — перепроверим
+}
+function checkSubjBrand(){
+  var sel=$("createSubj"), w=$("subjWarn"), v=sel.value;
+  if(!v){ sel.style.borderColor=""; w.style.display="none"; w.className="status"; w.textContent=""; return; }
+  if(!BRAND_SUBJECTS){ return; } // справочник ещё грузится — не трогаем
+  var opt=sel.options[sel.selectedIndex];
+  var nm=opt?opt.textContent:"";
+  if(BRAND_SUBJECTS.has(String(v))){
+    sel.style.borderColor=""; w.style.display="none"; w.className="status"; w.textContent="";
+  } else {
+    sel.style.borderColor="var(--err)";
+    w.className="status show err"; w.style.display="";
+    w.textContent="⚠ У бренда JOTO ещё нет карточек в этой категории («"+nm+"»). Проверьте, что выбрали верную категорию.";
+  }
+  fit();
+}
 
 var CHARCS=[];
 $("loadCharcsBtn").addEventListener("click",async function(){
@@ -1050,6 +1084,7 @@ function applyNkRows(j){
     FILE_GROUPS[a].sizes.push({size:row.size, gtin:row.gtin});
   });
   renderFilePreview();
+  $("nkClearBtn").style.display="";
   var msg="Артикулов: "+(j.articles||Object.keys(FILE_GROUPS).length)+", строк (размеров): "+j.count+", из них с ГТИН: "+j.with_gtin+".";
   if(j.with_gtin===0) msg+=" ⚠ ГТИНы пустые — товары ещё не промодерированы в ЧЗ (нет присвоенных ГТИНов).";
   else msg+=" Проверьте предпросмотр и создайте карточки на WB.";
@@ -1072,6 +1107,20 @@ $("nkFileBtn").addEventListener("click",async function(){
     applyNkRows(j);
   }catch(e){ showStatus($("nkFileResult"),false,"Не удалось загрузить файл"); }
   finally{ spinOn($("nkFileBtn"),false,"Загрузить файл"); fit(); }
+});
+
+/* Удалить загруженный файл — сбрасываем выбор, разбор и предпросмотр */
+$("nkClearBtn").addEventListener("click",function(){
+  FILE_GROUPS=null;
+  $("nkFile").value="";
+  $("filePreview").innerHTML="";
+  $("createFromFileBtn").style.display="none";
+  $("nkClearBtn").style.display="none";
+  $("nkFileResult").className="status";
+  $("nkFileResult").textContent="";
+  $("fileCreateStatus").className="status";
+  $("fileCreateStatus").textContent="";
+  fit();
 });
 
 $("createFromFileBtn").addEventListener("click",async function(){
