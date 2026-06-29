@@ -1242,7 +1242,28 @@ def api_article_batch():
 
 WB_CONTENT_BASE = "https://content-api.wildberries.ru"
 WB_PRICES_BASE = "https://discounts-prices-api.wildberries.ru"  # API цен и скидок (отдельная категория токена)
+WB_RECOM_BASE = "https://recommend-api.wildberries.ru"  # API «Магазин рекомендует»
 WB_CARDS_PAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cards_page.html")
+
+def wb_recom_request(path, body, params=None, timeout=60):
+    """Запрос к API рекомендаций WB (/api/v1/set|ins|del|list).
+    Тело — список пар {"nm": nmID, "recom": [nmID,...]} (или список nmID для list)."""
+    if not WB_API_TOKEN:
+        raise RuntimeError("WB_API_TOKEN не задан.")
+    r = httpx.post(WB_RECOM_BASE + path, headers={"Authorization": WB_API_TOKEN},
+                   json=body, params=params, timeout=timeout)
+    if r.status_code >= 400:
+        try:
+            detail = r.json()
+        except Exception:
+            detail = r.text[:500]
+        if r.status_code in (401, 403):
+            detail = "нет доступа — токену WB нужна категория для рекомендаций. " + str(detail or "")
+        raise RuntimeError(f"WB recom {path} {r.status_code}: {detail}")
+    try:
+        return r.json()
+    except Exception:
+        return {}
 
 def wb_content_request(method, path, json_body=None, params=None, timeout=60):
     if not WB_API_TOKEN:
@@ -1611,6 +1632,56 @@ def api_rec_status_set():
     if db_set_rec_status(data.get("vendorCode"), data.get("status"), data.get("by")):
         return jsonify({"ok": True})
     return jsonify({"ok": False, "error": "Не удалось сохранить статус"}), 400
+
+def _to_int_list(v):
+    out = []
+    for x in (v or []):
+        try:
+            out.append(int(x))
+        except Exception:
+            pass
+    return out
+
+@app.route("/api/wb/recom-set", methods=["POST"])
+def api_wb_recom_set():
+    """Перезаписать рекомендации ОДНОЙ карточки на WB (по согласованию)."""
+    data = request.get_json(silent=True) or {}
+    try:
+        nm = int(data.get("nmID"))
+    except Exception:
+        return jsonify({"ok": False, "error": "Нет nmID карточки"}), 400
+    recom = [x for x in _to_int_list(data.get("recom")) if x != nm]
+    try:
+        wb_recom_request("/api/v1/set", [{"nm": nm, "recom": recom}])
+        return jsonify({"ok": True, "count": len(recom)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
+
+@app.route("/api/wb/recom-bulk", methods=["POST"])
+def api_wb_recom_bulk():
+    """Массово: добавить артикул в рекомендации (action=add) или очистить (action=clear)."""
+    data = request.get_json(silent=True) or {}
+    action = (data.get("action") or "add").strip()
+    targets = [x for x in _to_int_list(data.get("nmIDs")) if x]
+    if not targets:
+        return jsonify({"ok": False, "error": "Нет карточек для применения"}), 400
+    try:
+        if action == "clear":
+            pairs = [{"nm": nm, "recom": []} for nm in targets]
+            for i in range(0, len(pairs), 500):
+                wb_recom_request("/api/v1/set", pairs[i:i + 500])
+            return jsonify({"ok": True, "applied": len(targets)})
+        # add
+        try:
+            rec = int(data.get("recomNmID"))
+        except Exception:
+            return jsonify({"ok": False, "error": "Не указан артикул для добавления"}), 400
+        pairs = [{"nm": nm, "recom": [rec]} for nm in targets if nm != rec]
+        for i in range(0, len(pairs), 500):
+            wb_recom_request("/api/v1/ins", pairs[i:i + 500])
+        return jsonify({"ok": True, "applied": len(pairs)})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 502
 
 @app.route("/api/wb/bulk-edit", methods=["POST"])
 def api_wb_bulk_edit():
