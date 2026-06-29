@@ -160,6 +160,27 @@ td textarea{min-height:40px}
 #filePreview td input{width:100%;box-sizing:border-box;min-width:90px}
 .tbl-wrap{overflow:auto;border:1.5px solid var(--line);border-radius:var(--r)}
 .del-row{background:transparent;border:1px solid var(--line);color:var(--err);border-radius:8px;cursor:pointer;font-size:16px;width:30px;height:30px;line-height:1}
+/* ---- Чек-лист новинок (схема этапов) ---- */
+.nov-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.nov-bar{height:8px;border-radius:6px;background:var(--line);overflow:hidden;flex:1;min-width:120px}
+.nov-bar-fill{height:100%;background:var(--accent);width:0;transition:width .25s}
+.nov-stage{display:flex;gap:14px;position:relative}
+.nov-rail{position:relative;flex:none;width:30px}
+.nov-stage:not(:last-child) .nov-rail::after{content:"";position:absolute;top:30px;bottom:-8px;left:14px;width:2px;background:var(--line-strong)}
+.nov-num{width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:700;font-size:13px}
+.nov-num.done{background:#23a55a}
+.nov-body{flex:1;padding-bottom:18px;min-width:0}
+.nov-stitle{font-weight:700;font-size:15px;margin-top:4px}
+.nov-ssub{font-size:12.5px;color:var(--ink-2);margin:3px 0 6px}
+.nov-sub{margin:8px 0 4px;font-weight:600;font-size:13.5px;color:var(--ink)}
+.nov-note{font-size:12px;color:var(--ink-3);margin:2px 0 2px 2px}
+.nov-item{display:flex;gap:9px;align-items:flex-start;padding:5px 0;cursor:pointer;font-size:13.5px}
+.nov-item input{width:18px;height:18px;flex:none;margin-top:1px;cursor:pointer}
+.nov-item.checked span.nov-lbl{color:var(--ink-3);text-decoration:line-through}
+.nov-meta{font-size:11px;color:var(--ink-3);margin-left:auto;white-space:nowrap;padding-left:8px}
+.nov-card>summary{list-style:none;outline:none}
+.nov-card>summary::-webkit-details-marker{display:none}
+.nov-card[open]>summary{margin-bottom:6px}
 .charcs{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:6px}
 .charc-tag{font-size:10px;color:var(--err);font-weight:700;letter-spacing:.05em}
 #theme-toggle{width:38px;height:38px;border-radius:50%;cursor:pointer;display:grid;place-items:center;font-size:14px;
@@ -187,6 +208,7 @@ td textarea{min-height:40px}
     <button class="tab" data-mode="edit" type="button">✎ Редактирование карточек</button>
     <button class="tab" data-mode="create" type="button">＋ Создание карточек</button>
     <button class="tab" data-mode="recommend" type="button">💡 Рекомендации</button>
+    <button class="tab" data-mode="novelty" type="button">🚀 Новинки</button>
     <button class="tab" data-mode="checklist" type="button">✓ Чек-лист</button>
   </div>
 
@@ -224,6 +246,12 @@ td textarea{min-height:40px}
         <div class="hc-top"><div class="hc-ico">💡</div></div>
         <div class="hc-title">Рекомендации</div>
         <div class="hc-sub">Подсказки бота по вашим карточкам и артикулам.</div>
+        <div class="hc-go"><span>Открыть</span><span class="hc-arrow">→</span></div>
+      </button>
+      <button class="home-card" data-go="novelty" type="button">
+        <div class="hc-top"><div class="hc-ico">🚀</div></div>
+        <div class="hc-title">Чек-лист новинок</div>
+        <div class="hc-sub">Пошаговый запуск новинки на WB по регламенту: подготовка карточки, реклама, отзывы, масштабирование — с отметками по каждому артикулу.</div>
         <div class="hc-go"><span>Открыть</span><span class="hc-arrow">→</span></div>
       </button>
       <button class="home-card" data-go="checklist" type="button">
@@ -479,6 +507,22 @@ td textarea{min-height:40px}
     <div id="recResults"></div>
   </section>
 
+  <!-- ============ ЧЕК-ЛИСТ НОВИНОК ============ -->
+  <section class="panel" id="panel-novelty" hidden>
+    <div class="block">
+      <h2>Чек-лист запуска новинки на Wildberries</h2>
+      <p class="note" style="margin-top:0">По каждому артикулу-новинке — все этапы запуска по регламенту с галочками. Отметки общие для всех менеджеров и сохраняются (видно, кто и когда отметил).</p>
+      <div class="row" style="margin-top:12px;align-items:flex-end">
+        <div class="field"><label class="label" for="novArt">Артикул новинки</label><input id="novArt" type="text" placeholder="например: J09017" autocomplete="off"></div>
+        <div class="field grow2"><label class="label" for="novTitle">Название (необязательно)</label><input id="novTitle" type="text" placeholder="например: Худи оверсайз" autocomplete="off"></div>
+        <button class="btn accent" id="novAddBtn" type="button"><span class="spin"></span><span class="lbl">Добавить новинку</span></button>
+        <button class="btn secondary" id="novReloadBtn" type="button"><span class="spin"></span><span class="lbl">Обновить</span></button>
+      </div>
+      <div class="status" id="novStatus"></div>
+    </div>
+    <div id="novList"></div>
+  </section>
+
   <!-- ============ ЧЕК-ЛИСТ (встроенное приложение) ============ -->
   <section class="panel" id="panel-checklist" hidden>
     <div class="block" style="padding:0;overflow:hidden">
@@ -581,10 +625,12 @@ function setMode(m){
   $("panel-edit").hidden=(m!=="edit");
   $("panel-create").hidden=(m!=="create");
   $("panel-recommend").hidden=(m!=="recommend");
+  $("panel-novelty").hidden=(m!=="novelty");
   $("panel-checklist").hidden=(m!=="checklist");
   if(m==="checklist"){ var f=$("checklistFrame"); if(f && !f.src) f.src=CHECKLIST_URL; }
   if(m==="recommend" && !REC_ALL.length && !REC_LOADING){ loadRecommendations(); }
   if(m==="create" && BRAND_SUBJECTS===null && !BRAND_SUBJ_LOADING){ loadBrandSubjects(); }
+  if(m==="novelty" && NOV_DATA===null && !NOV_LOADING){ loadNovelty(); }
   fit();
 }
 /* плитки на «Обзоре» открывают нужную вкладку */
@@ -1358,6 +1404,9 @@ $("artCreateBtn").addEventListener("click",async function(){
       $("artResult").style.display="block";
       artRefreshHint();
       bxCreateChzTask(j.article,(j.category_title||"")+" · "+(j.color||"")); // задача Дарье на ЧЗ
+      // новинка автоматически попадает в чек-лист запуска
+      api("/api/novelty/add",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({article:j.article,title:((j.category_title||"")+(j.color?(" "+j.color):"")).trim(),by:CURRENT_USER})})
+        .then(function(){ if(NOV_DATA!==null) loadNovelty(); }).catch(function(){});
     } else showStatus($("artStatus"),false,(j&&j.error)?j.error:"Не удалось создать артикул");
   }catch(e){ showStatus($("artStatus"),false,"Не удалось связаться с сервером"); }
   finally{ spinOn($("artCreateBtn"),false,"Создать артикул"); fit(); }
@@ -1367,6 +1416,200 @@ $("artCopyBtn").addEventListener("click",function(){
   try{ if(navigator.clipboard) navigator.clipboard.writeText(t); $("artCopyBtn").textContent="Скопировано ✓"; setTimeout(function(){$("artCopyBtn").textContent="Скопировать артикул";},1500); }catch(e){}
 });
 artLoadCategories();
+
+/* ============================================================
+   ЧЕК-ЛИСТ ЗАПУСКА НОВИНОК (этапы → подэтапы → пункты)
+============================================================ */
+var NOVELTY_STAGES=[
+  { title:"Этап 1 · Подготовка карточки к отгрузке на ФФ",
+    sub:"Срок: до отправки товара на ВБ. Карточка должна быть полностью готова.",
+    items:[
+      {key:"s1_chars", label:"Заполнены все характеристики"},
+      {key:"s1_photo", label:"Загружены фото и инфографика с размерной сеткой"},
+      {key:"s1_video", label:"Загружено видео (при наличии)"},
+      {key:"s1_seo",   label:"Проверено название и SEO"},
+      {key:"s1_desc",  label:"Проверено описание"},
+      {key:"s1_dims",  label:"Проверены габариты (сверка с Дашей)"},
+      {key:"s1_price", label:"Проверена цена запуска"},
+      {key:"s1_rec",   label:"Настроены рекомендации и связки с другими товарами бренда"}
+    ]},
+  { title:"Этап 2 · Работа с рекомендациями",
+    sub:"Настраиваются на этапе подготовки карточки до отгрузки. Какие товары добавлять:",
+    items:[
+      {key:"s2_line",  label:"Товары той же линейки (но не из склейки)"},
+      {key:"s2_compl", label:"Дополняющие товары"},
+      {key:"s2_aud",   label:"Товары с общей аудиторией"},
+      {key:"s2_top",   label:"Лидеры продаж бренда"},
+      {key:"s2_adj",   label:"Новинки смежных категорий"},
+      {key:"s2_check", label:"Перед запуском рекламы убедиться, что рекомендации отображаются корректно"}
+    ]},
+  { title:"Этап 3 · День поступления товара на склад WB",
+    sub:"После появления в продаже (отгружено от 50 шт) запускается реклама. Тип кампании: ручная (поиск + рекомендации).",
+    items:[
+      {key:"s3_keys",  label:"Проверить, начинают ли подцепляться ключи"},
+      {key:"s3_serp",  label:"Проверить, как товар отображается в выдаче по запросам"},
+      {key:"s3_bid",   label:"Скорректировать ставку, чтобы выдача была топ-50"},
+      {key:"s3_shows", label:"Проверить показы по основным ключам"},
+      {key:"s3_fix",   label:"Зафиксировать стартовые показатели"}
+    ]},
+  { title:"Этап 4 · Следующий день после запуска",
+    sub:"Подгрузка остатков на ВБ — анализ первых данных и работа с отзывами.",
+    subs:[
+      { title:"4.1 · Анализ первых рекламных данных",
+        notes:[
+          "Цель: собрать поисковые запросы, получить первичную статистику по кликам, проверить релевантность трафика.",
+          "Контроль: показы · клики · CTR · поисковые запросы · расходы."
+        ],
+        items:[
+          {key:"s4_offrel", label:"Отключить нерелевантные запросы"},
+          {key:"s4_bids",   label:"Скорректировать ставки"},
+          {key:"s4_pos",    label:"Проверить позиции по основным ключам"},
+          {key:"s4_bidder", label:"Включить РК в биддере (дальше отсеивает запросы по заданному примеру)"}
+        ]},
+      { title:"4.2 · Работа с отзывами",
+        items:[
+          {key:"s4_rev_new", label:"Новая карточка (в склейке нет работающих артикулов): 12 выкупов по схеме 3-4-5 за 3 дня, из них 5 с отзывами (3 с фото + 2 текстовых)"},
+          {key:"s4_rev_glue", label:"Карточка в склейке с активным артикулом: 3 отзыва (2 с фото + 1 текстовый)"}
+        ]}
+    ]},
+  { title:"Этап 5 · Закрепление отзывов",
+    sub:"",
+    subs:[
+      { title:"5.1 · Первое закрепление",
+        notes:["После первого качественного отзыва с фото. Критерии: хорошее фото · подробное описание · раскрыто ключевое преимущество."],
+        items:[ {key:"s5_first", label:"Закрепить 1 лучший отзыв"} ]},
+      { title:"5.2 · Второе закрепление",
+        notes:["После накопления дополнительных отзывов покупателей. Критерии: выглядит естественно · полезная информация · дополняет закреплённый."],
+        items:[ {key:"s5_second", label:"Закрепить второй отзыв"} ]}
+    ]},
+  { title:"Этап 6 · Масштабирование",
+    sub:"Через 7–14 дней анализ: продажи · конверсия · CTR · ДРР · выкуп · возвраты · отзывы. Если показатели в плане:",
+    items:[
+      {key:"s6_bids",     label:"Увеличить ставки"},
+      {key:"s6_budget",   label:"Расширить рекламный бюджет"},
+      {key:"s6_keys",     label:"Усилить самые эффективные запросы"},
+      {key:"s6_presence", label:"Расширить присутствие в рекомендациях и рекламных размещениях"}
+    ]}
+];
+function stageItemKeys(st){
+  var ks=[]; (st.items||[]).forEach(function(it){ks.push(it.key);});
+  (st.subs||[]).forEach(function(sb){ (sb.items||[]).forEach(function(it){ks.push(it.key);}); });
+  return ks;
+}
+function novAllKeys(){ var a=[]; NOVELTY_STAGES.forEach(function(st){ a=a.concat(stageItemKeys(st)); }); return a; }
+function novDate(at){ try{ var d=new Date(at*1000);
+  return d.toLocaleDateString("ru-RU",{day:"2-digit",month:"2-digit"})+" "+d.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
+
+var NOV_DATA=null, NOV_LOADING=false;
+async function loadNovelty(){
+  NOV_LOADING=true;
+  try{ var j=await api("/api/novelty"); NOV_DATA=(j&&j.ok)?{items:j.items||[],checks:j.checks||{}}:{items:[],checks:{}}; }
+  catch(e){ NOV_DATA={items:[],checks:{}}; }
+  NOV_LOADING=false;
+  renderNovelty();
+}
+function novItemHtml(art,it){
+  var ch=(NOV_DATA.checks[art]||{})[it.key]||{};
+  var on=!!ch.checked;
+  var meta=(on&&(ch.by||ch.at))?('<span class="nov-meta">'+esc(ch.by||"")+(ch.at?(" · "+novDate(ch.at)):"")+'</span>'):'';
+  return '<label class="nov-item'+(on?' checked':'')+'">'
+    +'<input type="checkbox" data-art="'+esc(art)+'" data-key="'+esc(it.key)+'"'+(on?' checked':'')+'>'
+    +'<span class="nov-lbl">'+esc(it.label)+'</span>'+meta+'</label>';
+}
+function novStageHtml(art,st,idx){
+  var its=stageItemKeys(st), checks=NOV_DATA.checks[art]||{};
+  var done=its.filter(function(k){return checks[k]&&checks[k].checked;}).length;
+  var full=its.length>0&&done===its.length;
+  var h='<div class="nov-stage"><div class="nov-rail"><span class="nov-num'+(full?' done':'')+'">'+(idx+1)+'</span></div><div class="nov-body">';
+  h+='<div class="nov-stitle">'+esc(st.title)+'</div>';
+  if(st.sub) h+='<div class="nov-ssub">'+esc(st.sub)+'</div>';
+  (st.items||[]).forEach(function(it){ h+=novItemHtml(art,it); });
+  (st.subs||[]).forEach(function(sb){
+    h+='<div class="nov-sub">'+esc(sb.title)+'</div>';
+    (sb.notes||[]).forEach(function(n){ h+='<div class="nov-note">'+esc(n)+'</div>'; });
+    (sb.items||[]).forEach(function(it){ h+=novItemHtml(art,it); });
+  });
+  h+='</div></div>';
+  return h;
+}
+function renderNovelty(){
+  if(!NOV_DATA){ return; }
+  var items=NOV_DATA.items||[], all=novAllKeys();
+  if(!items.length){ $("novList").innerHTML='<div class="block"><div class="muted">Пока нет новинок. Добавьте артикул выше — по нему появится чек-лист запуска. Новые артикулы из вкладки «Генерация» добавляются сюда автоматически.</div></div>'; fit(); return; }
+  $("novList").innerHTML=items.map(function(o){
+    var art=o.article, checks=NOV_DATA.checks[art]||{};
+    var done=all.filter(function(k){return checks[k]&&checks[k].checked;}).length;
+    var pct=all.length?Math.round(done*100/all.length):0;
+    var head='<div class="nov-head"><b class="pick-vc">'+esc(art)+'</b>'
+      +(o.title?(' <span class="muted">'+esc(o.title)+'</span>'):'')
+      +'<span class="nov-count" style="font-size:12px;color:var(--ink-2)">'+done+'/'+all.length+'</span>'
+      +'<div class="nov-bar"><div class="nov-bar-fill" style="width:'+pct+'%"></div></div>'
+      +'<button class="btn secondary sm nov-del" data-art="'+esc(art)+'" type="button">Удалить</button></div>';
+    var scheme='<div style="margin-top:14px">'+NOVELTY_STAGES.map(function(st,i){return novStageHtml(art,st,i);}).join("")+'</div>';
+    return '<details class="block nov-card"'+(items.length===1?' open':'')+'><summary>'+head+'</summary>'+scheme+'</details>';
+  }).join("");
+  $("novList").querySelectorAll('input[type=checkbox][data-key]').forEach(function(cb){
+    cb.addEventListener("change",function(){ novToggle(cb); });
+  });
+  $("novList").querySelectorAll(".nov-del").forEach(function(b){
+    b.addEventListener("click",function(e){ e.preventDefault(); e.stopPropagation(); novRemoveArm(b); });
+  });
+  fit();
+}
+function novUpdateProgress(det,art){
+  var checks=NOV_DATA.checks[art]||{}, all=novAllKeys();
+  var done=all.filter(function(k){return checks[k]&&checks[k].checked;}).length;
+  var fill=det.querySelector(".nov-bar-fill"); if(fill) fill.style.width=(all.length?Math.round(done*100/all.length):0)+"%";
+  var cnt=det.querySelector(".nov-count"); if(cnt) cnt.textContent=done+"/"+all.length;
+  var stages=det.querySelectorAll(".nov-stage");
+  NOVELTY_STAGES.forEach(function(st,i){
+    var its=stageItemKeys(st), d=its.filter(function(k){return checks[k]&&checks[k].checked;}).length;
+    var num=stages[i]&&stages[i].querySelector(".nov-num");
+    if(num) num.classList.toggle("done", its.length>0&&d===its.length);
+  });
+}
+function novToggle(cb){
+  var art=cb.dataset.art, key=cb.dataset.key, on=cb.checked;
+  NOV_DATA.checks[art]=NOV_DATA.checks[art]||{};
+  NOV_DATA.checks[art][key]={checked:on, by:CURRENT_USER||"", at:Math.floor(Date.now()/1000)};
+  var lab=cb.closest(".nov-item");
+  if(lab){
+    lab.classList.toggle("checked",on);
+    var meta=lab.querySelector(".nov-meta");
+    if(on){ if(!meta){ meta=document.createElement("span"); meta.className="nov-meta"; lab.appendChild(meta); } meta.textContent=(CURRENT_USER||"вы")+" · сейчас"; }
+    else if(meta){ meta.remove(); }
+  }
+  var det=cb.closest("details"); if(det) novUpdateProgress(det,art);
+  api("/api/novelty/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({article:art,key:key,checked:on,by:CURRENT_USER})})
+    .then(function(j){ if(!j||!j.ok) showStatus($("novStatus"),false,"Отметку не удалось сохранить — обновите страницу"); })
+    .catch(function(){ showStatus($("novStatus"),false,"Нет связи с сервером — отметка не сохранена"); });
+}
+function novRemoveArm(b){
+  if(b.dataset.armed==="1"){ novRemove(b.dataset.art); return; }
+  b.dataset.armed="1"; var old=b.textContent; b.textContent="Точно удалить?"; b.classList.add("err");
+  setTimeout(function(){ if(b.dataset.armed==="1"){ b.dataset.armed="0"; b.textContent=old; b.classList.remove("err"); } },3000);
+}
+async function novRemove(art){
+  try{
+    var j=await api("/api/novelty/remove",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({article:art})});
+    if(j&&j.ok){ await loadNovelty(); showStatus($("novStatus"),true,"Новинка удалена"); }
+    else showStatus($("novStatus"),false,(j&&j.error)||"Не удалось удалить");
+  }catch(e){ showStatus($("novStatus"),false,"Нет связи с сервером"); }
+}
+$("novAddBtn").addEventListener("click",async function(){
+  var art=$("novArt").value.trim();
+  if(!art){ showStatus($("novStatus"),false,"Укажите артикул"); return; }
+  spinOn($("novAddBtn"),true,"Добавляю…");
+  try{
+    var j=await api("/api/novelty/add",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({article:art,title:$("novTitle").value.trim(),by:CURRENT_USER})});
+    if(j&&j.ok){ $("novArt").value=""; $("novTitle").value=""; await loadNovelty(); showStatus($("novStatus"),true,"Новинка добавлена в чек-лист"); }
+    else showStatus($("novStatus"),false,(j&&j.error)||"Не удалось добавить");
+  }catch(e){ showStatus($("novStatus"),false,"Нет связи с сервером"); }
+  finally{ spinOn($("novAddBtn"),false,"Добавить новинку"); fit(); }
+});
+$("novArt").addEventListener("keydown",function(e){ if(e.key==="Enter"){ e.preventDefault(); $("novAddBtn").click(); } });
+$("novTitle").addEventListener("keydown",function(e){ if(e.key==="Enter"){ e.preventDefault(); $("novAddBtn").click(); } });
+$("novReloadBtn").addEventListener("click",function(){ spinOn($("novReloadBtn"),true,"Обновляю…"); loadNovelty().finally(function(){ spinOn($("novReloadBtn"),false,"Обновить"); }); });
 
 /* инструкция */
 $("heroHelp").addEventListener("click",function(){ $("helpOvl").classList.add("show"); });

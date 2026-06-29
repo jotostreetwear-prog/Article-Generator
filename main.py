@@ -166,6 +166,25 @@ def init_db():
         """)
         # на случай, если таблица уже была создана без колонки автора
         cur.execute("ALTER TABLE rec_status ADD COLUMN IF NOT EXISTS updated_by TEXT")
+        # Чек-лист запуска новинок: список артикулов-новинок и отметки по пунктам
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS novelty_items (
+                article    TEXT PRIMARY KEY,
+                title      TEXT,
+                created_by TEXT,
+                created_at BIGINT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS novelty_checks (
+                article    TEXT,
+                item_key   TEXT,
+                checked    BOOLEAN DEFAULT FALSE,
+                updated_by TEXT,
+                updated_at BIGINT,
+                PRIMARY KEY (article, item_key)
+            )
+        """)
         conn.commit()
         cur.close()
         conn.close()
@@ -235,6 +254,90 @@ def db_set_rec_status(vendor_code, status, by=""):
         return True
     except Exception as e:
         print(f"Ошибка db_set_rec_status: {e}")
+        return False
+
+def db_novelty_get():
+    """Чек-лист новинок: {items:[{article,title,by,at}], checks:{article:{key:{checked,by,at}}}}."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT article, title, created_by, created_at FROM novelty_items ORDER BY created_at DESC")
+        items = [{"article": r[0], "title": r[1] or "", "by": r[2] or "", "at": r[3] or 0}
+                 for r in cur.fetchall()]
+        cur.execute("SELECT article, item_key, checked, updated_by, updated_at FROM novelty_checks")
+        checks = {}
+        for r in cur.fetchall():
+            checks.setdefault(r[0], {})[r[1]] = {"checked": bool(r[2]), "by": r[3] or "", "at": r[4] or 0}
+        cur.close()
+        conn.close()
+        return {"items": items, "checks": checks}
+    except Exception as e:
+        print(f"Ошибка db_novelty_get: {e}")
+        return {"items": [], "checks": {}}
+
+def db_novelty_add(article, title="", by=""):
+    article = (article or "").strip()
+    if not article:
+        return False
+    title = (title or "").strip()[:200]
+    by = (by or "").strip()[:120]
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO novelty_items (article, title, created_by, created_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (article)
+            DO UPDATE SET title = CASE WHEN EXCLUDED.title <> '' THEN EXCLUDED.title ELSE novelty_items.title END
+        """, (article, title, by, int(time.time())))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Ошибка db_novelty_add: {e}")
+        return False
+
+def db_novelty_remove(article):
+    article = (article or "").strip()
+    if not article:
+        return False
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("DELETE FROM novelty_checks WHERE article = %s", (article,))
+        cur.execute("DELETE FROM novelty_items WHERE article = %s", (article,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Ошибка db_novelty_remove: {e}")
+        return False
+
+def db_novelty_set_check(article, item_key, checked, by=""):
+    article = (article or "").strip()
+    item_key = (item_key or "").strip()
+    if not article or not item_key:
+        return False
+    by = (by or "").strip()[:120]
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO novelty_checks (article, item_key, checked, updated_by, updated_at)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (article, item_key)
+            DO UPDATE SET checked = EXCLUDED.checked,
+                          updated_by = EXCLUDED.updated_by,
+                          updated_at = EXCLUDED.updated_at
+        """, (article, item_key, bool(checked), by, int(time.time())))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Ошибка db_novelty_set_check: {e}")
         return False
 
 def resolve_category_code(name):
@@ -1651,6 +1754,36 @@ def api_rec_status_set():
     if db_set_rec_status(data.get("vendorCode"), data.get("status"), data.get("by")):
         return jsonify({"ok": True})
     return jsonify({"ok": False, "error": "Не удалось сохранить статус"}), 400
+
+# ===================== ЧЕК-ЛИСТ ЗАПУСКА НОВИНОК =====================
+
+@app.route("/api/novelty", methods=["GET"])
+def api_novelty_get():
+    """Список новинок и отметки по пунктам чек-листа (общие для всех)."""
+    data = db_novelty_get()
+    return jsonify({"ok": True, "items": data["items"], "checks": data["checks"]})
+
+@app.route("/api/novelty/add", methods=["POST"])
+def api_novelty_add():
+    data = request.get_json(silent=True) or {}
+    if db_novelty_add(data.get("article"), data.get("title"), data.get("by")):
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "Не удалось добавить новинку"}), 400
+
+@app.route("/api/novelty/remove", methods=["POST"])
+def api_novelty_remove():
+    data = request.get_json(silent=True) or {}
+    if db_novelty_remove(data.get("article")):
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "Не удалось удалить новинку"}), 400
+
+@app.route("/api/novelty/check", methods=["POST"])
+def api_novelty_check():
+    data = request.get_json(silent=True) or {}
+    if db_novelty_set_check(data.get("article"), data.get("key"),
+                            data.get("checked"), data.get("by")):
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "Не удалось сохранить отметку"}), 400
 
 def _to_int_list(v):
     out = []
