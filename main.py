@@ -1350,6 +1350,18 @@ def product_recommendations(simplified, top=5):
             "similar": [_rec_brief(b) for b in similar[:top]],
             "complement": [_rec_brief(b) for b in complement[:top]],
         })
+    # Обратный индекс: где артикул УЖЕ фигурирует как рекомендация — в комплекте
+    # каких других товаров он стоит («сейчас рекомендовано»).
+    by_vc = {}
+    for r in out:
+        for comp in r["complement"]:
+            by_vc.setdefault(comp.get("vendorCode"), []).append({
+                "nmID": r.get("nmID"), "vendorCode": r.get("vendorCode"),
+                "title": r.get("title"), "subjectName": r.get("subjectName"),
+                "color": r.get("color"), "photo": r.get("photo"),
+            })
+    for r in out:
+        r["recommended_by"] = by_vc.get(r["vendorCode"], [])
     return out
 
 
