@@ -457,17 +457,17 @@ td textarea{min-height:40px}
   <!-- ============ РЕКОМЕНДАЦИИ ============ -->
   <section class="panel" id="panel-recommend" hidden>
     <div class="block">
-      <h2>Рекомендации по карточкам</h2>
-      <p class="note" style="margin-top:0">Бот проверяет ваши карточки на Wildberries и по каждому артикулу советует, что улучшить:
-        фото, SEO-описание, название, характеристики, баркод. Сначала показываются карточки с проблемами.</p>
+      <h2>Какие артикулы рекомендовать</h2>
+      <p class="note" style="margin-top:0">Бот по каждому вашему артикулу подбирает, что советовать к нему:
+        <b>похожие</b> (та же категория, другие цвета/модели) и <b>комплект</b> (дополняющие товары — к верху низ, аксессуары и наоборот, по возможности в тон).
+        Введите артикул, чтобы посмотреть рекомендации к нему, или оставьте пусто — покажет по всем.</p>
       <div class="row" style="margin-top:14px">
         <div class="field grow2">
-          <label class="label" for="recSearch">Артикул / название (пусто = все карточки)</label>
+          <label class="label" for="recSearch">Артикул / название (пусто = все)</label>
           <input id="recSearch" type="text" placeholder="например: J05 или худи — затем Enter" autocomplete="off">
         </div>
-        <button class="btn accent" id="recRunBtn" type="button"><span class="spin"></span><span class="lbl">Проанализировать карточки</span></button>
+        <button class="btn accent" id="recRunBtn" type="button"><span class="spin"></span><span class="lbl">Подобрать рекомендации</span></button>
       </div>
-      <div id="recSummary" class="row" style="margin-top:14px;gap:8px;display:none"></div>
       <div class="status" id="recStatus"></div>
     </div>
 
@@ -561,37 +561,37 @@ document.querySelectorAll(".home-card").forEach(function(card){
 });
 
 /* ============================================================
-   РЕКОМЕНДАЦИИ (бот-советчик по карточкам)
+   РЕКОМЕНДАЦИИ (какие артикулы советовать к товару)
 ============================================================ */
-function recColor(l){ return l==="bad"?"#B42318":(l==="warn"?"#9A6700":"#15803D"); }
-function recPill(bg,fg,txt){ return '<span style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;font-weight:600;font-size:13px;background:'+bg+';color:'+fg+'">'+txt+'</span>'; }
+function recChip(it){
+  return '<span style="display:inline-flex;flex-direction:column;gap:1px;padding:6px 10px;margin:3px 5px 0 0;'
+    +'border:1px solid var(--line);border-radius:10px;background:var(--surface-2)">'
+    +'<b class="pick-vc" style="font-size:12.5px">'+esc(it.vendorCode||"—")+'</b>'
+    +'<span class="muted" style="font-size:11px">'+esc(it.subjectName||"")+(it.color?(' · '+esc(it.color)):"")+'</span></span>';
+}
+function recCell(list,empty){
+  if(!list||!list.length) return '<span class="muted">'+empty+'</span>';
+  return list.map(recChip).join("");
+}
 $("recRunBtn").addEventListener("click",async function(){
-  spinOn($("recRunBtn"),true,"Анализирую…");
-  $("recResults").innerHTML=""; $("recSummary").style.display="none"; $("recStatus").className="status";
+  spinOn($("recRunBtn"),true,"Подбираю…");
+  $("recResults").innerHTML=""; $("recStatus").className="status";
   try{
-    var j=await api("/api/wb/recommendations?limit=1000&search="+encodeURIComponent($("recSearch").value.trim()));
+    var j=await api("/api/wb/recommendations?search="+encodeURIComponent($("recSearch").value.trim()));
     if(!j.ok){ showStatus($("recStatus"),false,"Ошибка WB: "+(j.error||"")); return; }
-    if((j.count||0)===0){ showStatus($("recStatus"),false,"Карточки не найдены"); return; }
-    var s=j.summary||{};
-    $("recSummary").innerHTML=recPill("#FDECEC","#B42318","⛔ Проблемы: "+(s.bad||0))
-      +recPill("#FDF0D5","#9A6700","⚠ Замечания: "+(s.warn||0))
-      +recPill("#E6F7EC","#15803D","✓ Хорошо: "+(s.ok||0));
-    $("recSummary").style.display="";
+    if((j.count||0)===0){ showStatus($("recStatus"),false,"Артикулы не найдены"); return; }
+    showStatus($("recStatus"),true,"Подобрано по "+j.count+" артикул(ам) из каталога ("+(j.total_catalog||j.count)+" карточек).");
     var rows=j.cards.map(function(c){
-      var recHtml;
-      if(c.level==="ok"){ recHtml='<span style="color:#15803D;font-weight:600">✓ Всё заполнено хорошо</span>'; }
-      else{
-        recHtml='<ul style="margin:0;padding-left:18px">'+(c.recs||[]).map(function(r){
-          return '<li style="margin:3px 0"><b style="color:'+recColor(r.level)+'">'+esc(r.tag)+':</b> '+esc(r.text)+'</li>';
-        }).join("")+'</ul>';
-      }
-      return '<tr><td class="pick-vc" style="border-left:3px solid '+recColor(c.level)+'">'+esc(c.vendorCode||"—")
-        +'</td><td>'+esc(c.title||"")+'<div class="muted">'+esc(c.subjectName||"")+' · фото: '+(c.photos||0)+'</div></td>'
-        +'<td>'+recHtml+'</td></tr>';
+      return '<tr><td style="white-space:nowrap"><b class="pick-vc">'+esc(c.vendorCode||"—")+'</b>'
+        +'<div class="muted">'+esc(c.title||"")+'<br>'+esc(c.subjectName||"")+(c.color?(' · '+esc(c.color)):"")+'</div></td>'
+        +'<td>'+recCell(c.similar,"нет похожих в каталоге")+'</td>'
+        +'<td>'+recCell(c.complement,"нет дополняющих в каталоге")+'</td></tr>';
     }).join("");
-    $("recResults").innerHTML='<div class="block"><div class="tbl-wrap"><table><thead><tr><th>Артикул</th><th>Карточка</th><th>Рекомендации бота</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+    $("recResults").innerHTML='<div class="block"><div class="tbl-wrap"><table><thead><tr>'
+      +'<th>Товар</th><th>🔁 Похожие (другие цвета/модели)</th><th>🧩 Комплект (с этим носят)</th>'
+      +'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
   }catch(e){ showStatus($("recStatus"),false,"Не удалось связаться с сервером"); }
-  finally{ spinOn($("recRunBtn"),false,"Проанализировать карточки"); fit(); }
+  finally{ spinOn($("recRunBtn"),false,"Подобрать рекомендации"); fit(); }
 });
 $("recSearch").addEventListener("keydown",function(e){ if(e.key==="Enter"){ e.preventDefault(); $("recRunBtn").click(); } });
 

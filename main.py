@@ -1252,54 +1252,90 @@ def simplify_card(c):
         "raw": c,
     }
 
-def card_recommendations(card):
-    """«Бот»-советчик: по упрощённой карточке (см. simplify_card) выдаёт список
-    конкретных рекомендаций, что улучшить. Правила, без внешних зависимостей —
-    позже можно дополнить данными по CTR/продажам."""
-    recs = []
-    photos = card.get("photos") or 0
-    desc = (card.get("description") or "").strip()
-    title = (card.get("title") or "").strip()
-    chars = card.get("characteristics") or []
-    barcodes = card.get("barcodes") or []
+# --- Рекомендации товаров: какие артикулы советовать к данному ---------------
+# Группы одежды по ключевым словам категории WB (subjectName).
+_REC_TOP_KW = ("худи", "толстовк", "свитшот", "футболк", "лонгслив", "рубашк",
+               "джемпер", "кофт", "майк", "поло", "пиджак", "жакет", "куртк",
+               "ветровк", "бомбер", "водолазк", "блуз", "кардиган", "жилет")
+_REC_BOTTOM_KW = ("брюк", "шорт", "джинс", "юбк", "легинс", "леггинс", "штан", "бридж")
+_REC_ACC_KW = ("шапк", "носк", "сумк", "ремень", "перчатк", "шарф", "кепк",
+               "бандан", "очк", "рюкзак", "пояс", "панам", "бейсболк")
+_REC_SHOE_KW = ("кроссов", "кед", "ботин", "туфл", "сандал", "обув", "слипон", "сланц")
+# Что с чем сочетается (комплект): верх ↔ низ + аксессуары/обувь и т.д.
+_REC_COMPLEMENT = {
+    "top": ("bottom", "acc", "shoe"),
+    "bottom": ("top", "acc", "shoe"),
+    "acc": ("top", "bottom"),
+    "shoe": ("top", "bottom", "acc"),
+    "other": ("top", "bottom", "acc", "shoe"),
+}
+# Нейтральные цвета подходят почти ко всему.
+_REC_NEUTRAL = {"чёрный", "черный", "белый", "серый", "графит", "бежевый", "молочный", "хаки"}
 
-    def is_filled(v):
-        if v in (None, "", []):
-            return False
-        if isinstance(v, (list, tuple)):
-            return any(str(x).strip() for x in v)
-        return bool(str(v).strip())
-    filled = [c for c in chars if is_filled(c.get("value"))]
+def _rec_group(subject_name):
+    n = (subject_name or "").lower()
+    for kw in _REC_TOP_KW:
+        if kw in n: return "top"
+    for kw in _REC_BOTTOM_KW:
+        if kw in n: return "bottom"
+    for kw in _REC_ACC_KW:
+        if kw in n: return "acc"
+    for kw in _REC_SHOE_KW:
+        if kw in n: return "shoe"
+    return "other"
 
-    if photos == 0:
-        recs.append({"tag": "Фото", "level": "bad", "text": "Нет фото — добавьте минимум 3–5 фотографий (главный фактор конверсии)."})
-    elif photos < 4:
-        recs.append({"tag": "Фото", "level": "warn", "text": f"Мало фото ({photos}) — добавьте до 5+ ракурсов."})
+def _rec_color(card):
+    """Цвет из артикула (J05123/чёрный) или из характеристики «цвет»."""
+    vc = card.get("vendorCode") or ""
+    if "/" in vc:
+        return vc.split("/")[-1].strip().lower()
+    for ch in card.get("characteristics") or []:
+        if "цвет" in (ch.get("name") or "").lower():
+            v = ch.get("value")
+            if isinstance(v, (list, tuple)) and v:
+                return str(v[0]).strip().lower()
+            if v:
+                return str(v).strip().lower()
+    return ""
 
-    if not desc:
-        recs.append({"tag": "Описание", "level": "bad", "text": "Пустое описание — заполните SEO-описание с ключевыми словами."})
-    elif len(desc) < 200:
-        recs.append({"tag": "Описание", "level": "warn", "text": f"Короткое описание ({len(desc)} симв.) — расширьте до 1000+ с ключевыми словами."})
+def _rec_brief(card):
+    return {"nmID": card.get("nmID"), "vendorCode": card.get("vendorCode"),
+            "title": card.get("title"), "subjectName": card.get("subjectName"),
+            "color": card.get("_color", "")}
 
-    if not title:
-        recs.append({"tag": "Название", "level": "bad", "text": "Пустое название карточки."})
-    elif len(title) < 20:
-        recs.append({"tag": "Название", "level": "warn", "text": "Короткое название — добавьте ключевые слова и характеристики."})
-
-    if len(filled) < 5:
-        recs.append({"tag": "Характеристики", "level": "warn", "text": f"Заполнено мало характеристик ({len(filled)}) — заполните больше для ранжирования и фильтров."})
-
-    if not barcodes:
-        recs.append({"tag": "Баркод", "level": "bad", "text": "Нет баркода (ГТИН) — карточка может не уйти в продажу."})
-
-    # уровень карточки: bad если есть критичное, warn если только предупреждения
-    if any(r["level"] == "bad" for r in recs):
-        level = "bad"
-    elif recs:
-        level = "warn"
-    else:
-        level = "ok"
-    return {"level": level, "recs": recs}
+def product_recommendations(simplified, top=5):
+    """Для каждого артикула подбирает, какие ДРУГИЕ артикулы рекомендовать:
+    - similar: похожие (та же категория, другие цвета/модели);
+    - complement: комплект (дополняющие категории, по возможности «в тон»)."""
+    items = []
+    for c in simplified:
+        c = dict(c)
+        c["_group"] = _rec_group(c.get("subjectName"))
+        c["_color"] = _rec_color(c)
+        items.append(c)
+    out = []
+    for a in items:
+        ac, ag = a["_color"], a["_group"]
+        similar = [b for b in items
+                   if b["vendorCode"] != a["vendorCode"] and b.get("subjectName") == a.get("subjectName")]
+        # другой цвет — вперёд (показать ассортимент по цветам)
+        similar.sort(key=lambda b: 0 if (b["_color"] and b["_color"] != ac) else 1)
+        comp_groups = _REC_COMPLEMENT.get(ag, _REC_COMPLEMENT["other"])
+        complement = [b for b in items
+                      if b["vendorCode"] != a["vendorCode"] and b["_group"] in comp_groups]
+        def cscore(b):
+            if ac and b["_color"] == ac: return 0           # тот же цвет
+            if b["_color"] in _REC_NEUTRAL or ac in _REC_NEUTRAL: return 1  # нейтральный
+            return 2
+        complement.sort(key=cscore)
+        out.append({
+            "nmID": a.get("nmID"), "vendorCode": a.get("vendorCode"),
+            "title": a.get("title"), "subjectName": a.get("subjectName"),
+            "color": ac, "group": ag,
+            "similar": [_rec_brief(b) for b in similar[:top]],
+            "complement": [_rec_brief(b) for b in complement[:top]],
+        })
+    return out
 
 
 def build_update_object(c):
@@ -1440,45 +1476,26 @@ def api_wb_cards():
 
 @app.route("/api/wb/recommendations", methods=["GET"])
 def api_wb_recommendations():
-    """Анализ карточек WB и рекомендации «бота» по каждому артикулу."""
+    """Для каждого артикула — какие другие артикулы рекомендовать (похожие + комплект)."""
     search = (request.args.get("search", "") or "").strip()
     try:
-        max_cards = int(request.args.get("limit", "1000"))
+        top = int(request.args.get("top", "5"))
     except Exception:
-        max_cards = 1000
+        top = 5
+    top = max(1, min(top, 10))
     try:
-        cards = wb_fetch_cards(text_search=search, limit=100, max_cards=max_cards)
-        if search and not cards:
+        # Пул для подбора — весь каталог (рекомендовать можно любой артикул).
+        cards = wb_fetch_cards(text_search="", limit=100, max_cards=1000)
+        simplified = [simplify_card(c) for c in cards]
+        recs = product_recommendations(simplified, top=top)
+        # Вывод фильтруем по поиску, но сам подбор — по всему каталогу.
+        if search:
             q = search.lower()
-            allc = wb_fetch_cards(text_search="", limit=100, max_cards=max(max_cards, 1000))
-            cards = [c for c in allc
-                     if q in (c.get("vendorCode") or "").lower()
-                     or q in (c.get("title") or "").lower()]
-        out, n_bad, n_warn, n_ok = [], 0, 0, 0
-        for c in cards:
-            sc = simplify_card(c)
-            r = card_recommendations(sc)
-            if r["level"] == "bad":
-                n_bad += 1
-            elif r["level"] == "warn":
-                n_warn += 1
-            else:
-                n_ok += 1
-            out.append({
-                "nmID": sc.get("nmID"),
-                "vendorCode": sc.get("vendorCode"),
-                "title": sc.get("title"),
-                "subjectName": sc.get("subjectName"),
-                "photos": sc.get("photos"),
-                "level": r["level"],
-                "recs": r["recs"],
-            })
-        # сначала проблемные (bad → warn → ok)
-        order = {"bad": 0, "warn": 1, "ok": 2}
-        out.sort(key=lambda x: order.get(x["level"], 3))
-        return jsonify({"ok": True, "count": len(out),
-                        "summary": {"bad": n_bad, "warn": n_warn, "ok": n_ok},
-                        "cards": out})
+            recs = [r for r in recs
+                    if q in (r.get("vendorCode") or "").lower()
+                    or q in (r.get("title") or "").lower()]
+        return jsonify({"ok": True, "count": len(recs),
+                        "total_catalog": len(simplified), "cards": recs})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
