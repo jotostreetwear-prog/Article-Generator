@@ -357,6 +357,13 @@ td textarea{min-height:40px}
       </div>
       <div class="picker" id="smplList" style="margin-top:12px;display:none"></div>
       <div id="smplChosen" style="display:none;margin-top:12px;padding:12px 14px;border-radius:12px;background:#E6F7EC;border:1px solid #bfe6cd"></div>
+
+      <div id="smplEdit" style="display:none;margin-top:16px;border-top:1.5px solid var(--line);padding-top:14px">
+        <div class="field"><label class="label" for="smplDesc">Описание (из образца — можно поправить)</label><textarea id="smplDesc"></textarea></div>
+        <h2 style="margin-top:16px">Характеристики из образца</h2>
+        <p class="note" style="margin-top:0">Применятся ко всем создаваемым карточкам — можно поправить. <b>Цвет, состав и ТНВЭД</b> по каждому артикулу возьмутся из файла ЧЗ (перекроют эти значения).</p>
+        <div class="charcs" id="smplCharcs"></div>
+      </div>
     </div>
 
     <div class="block" id="nkBlock" style="border-color:var(--accent)">
@@ -1090,16 +1097,10 @@ $("createFromFileBtn").addEventListener("click",async function(){
   var compId=findCharcId(["состав"]);
   var colorId=findCharcId(["цвет"]);
   var tnvedId=findCharcId(["тнвэд","тн вэд","тн-вэд"]);
-  // «Обвязка» из образца: базовые характеристики (id -> массив значений) и описание.
+  // «Обвязка» из образца — берём ОТРЕДАКТИРОВАННЫЕ значения (поля под образцом).
   var baseCh={};
-  if(SAMPLE && SAMPLE.characteristics){
-    SAMPLE.characteristics.forEach(function(cc){
-      if(cc.id==null) return;
-      var v=cc.value, arr=Array.isArray(v)?v.map(String).filter(Boolean):((v==null||v==="")?[]:[String(v)]);
-      if(arr.length) baseCh[cc.id]=arr;
-    });
-  }
-  var baseDesc=(SAMPLE&&SAMPLE.description)?SAMPLE.description:"";
+  collectSampleCharcs().forEach(function(o){ if(o.id!=null && o.value && o.value.length) baseCh[o.id]=o.value; });
+  var baseDesc=($("smplDesc").value||"").trim();
   var items=Object.keys(FILE_GROUPS).map(function(a){
     var g=FILE_GROUPS[a];
     var chMap={}; for(var k in baseCh) chMap[k]=baseCh[k].slice();   // из образца
@@ -1169,11 +1170,27 @@ function chooseSample(card){
   var w=(dim.weightBrutto!=null?dim.weightBrutto:dim.weight); if(w!=null) $("cWei").value=w;
   var price; try{ price=((card.raw.sizes||[])[0]||{}).price; }catch(e){}
   if(price!=null&&price!=="") $("cPrice").value=price;
-  var nch=(card.characteristics||[]).length;
+  var chs=card.characteristics||[];
   $("smplChosen").style.display="";
   $("smplChosen").innerHTML='<b class="pick-vc">'+esc(card.vendorCode||"\u2014")+'</b> \u00b7 '+esc(card.title||"")
-    +'<div class="muted" style="margin-top:2px">\u041a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f: '+esc(card.subjectName||"")+' \u00b7 \u0431\u0440\u0435\u043d\u0434 '+esc(card.brand||"")+' \u00b7 \u043a\u043e\u043f\u0438\u0440\u0443\u0435\u043c \u043e\u043f\u0438\u0441\u0430\u043d\u0438\u0435 \u0438 '+nch+' \u0445\u0430\u0440\u0430\u043a\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043a. \u041f\u043e\u043b\u044f \u043d\u0438\u0436\u0435 \u043f\u043e\u0434\u0441\u0442\u0430\u0432\u043b\u0435\u043d\u044b \u0438\u0437 \u043e\u0431\u0440\u0430\u0437\u0446\u0430 \u2014 \u043c\u043e\u0436\u043d\u043e \u043f\u043e\u043f\u0440\u0430\u0432\u0438\u0442\u044c.</div>';
+    +'<div class="muted" style="margin-top:2px">\u041a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f: '+esc(card.subjectName||"")+' \u00b7 \u0431\u0440\u0435\u043d\u0434 '+esc(card.brand||"")+' \u00b7 \u043e\u043f\u0438\u0441\u0430\u043d\u0438\u0435 \u0438 '+chs.length+' \u0445\u0430\u0440\u0430\u043a\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043a \u0441\u043a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u043d\u044b \u043d\u0438\u0436\u0435 \u2014 \u043c\u043e\u0436\u043d\u043e \u043f\u043e\u043f\u0440\u0430\u0432\u0438\u0442\u044c.</div>';
+  // \u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u0443\u0435\u043c\u0430\u044f \u00ab\u043e\u0431\u0432\u044f\u0437\u043a\u0430\u00bb: \u043e\u043f\u0438\u0441\u0430\u043d\u0438\u0435 + \u0445\u0430\u0440\u0430\u043a\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043a\u0438 \u0438\u0437 \u043e\u0431\u0440\u0430\u0437\u0446\u0430
+  $("smplDesc").value=card.description||"";
+  $("smplCharcs").innerHTML = chs.length ? chs.map(function(c){
+    var val=Array.isArray(c.value)?c.value.join(", "):(c.value==null?"":String(c.value));
+    return '<div class="field"><label class="label">'+esc(c.name||("#"+c.id))+'</label>'
+      +'<input type="text" data-cid="'+c.id+'" value="'+esc(val)+'" autocomplete="off"></div>';
+  }).join("") : '<div class="muted">\u0423 \u043e\u0431\u0440\u0430\u0437\u0446\u0430 \u043d\u0435\u0442 \u0437\u0430\u043f\u043e\u043b\u043d\u0435\u043d\u043d\u044b\u0445 \u0445\u0430\u0440\u0430\u043a\u0442\u0435\u0440\u0438\u0441\u0442\u0438\u043a';
+  $("smplEdit").style.display="";
   fit();
+}
+function collectSampleCharcs(){
+  var out=[];
+  $("smplCharcs").querySelectorAll("input[data-cid]").forEach(function(inp){
+    var v=inp.value.trim(); if(!v) return;
+    out.push({ id:parseInt(inp.dataset.cid,10), value:v.split(",").map(function(s){return s.trim();}).filter(Boolean) });
+  });
+  return out;
 }
 
 
