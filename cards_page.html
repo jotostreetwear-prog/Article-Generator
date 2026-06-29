@@ -482,6 +482,27 @@ td textarea{min-height:40px}
         <button class="btn accent" id="recRunBtn" type="button"><span class="spin"></span><span class="lbl">Подобрать рекомендации</span></button>
       </div>
       <div class="status" id="recStatus"></div>
+
+      <div id="recBulk" style="display:none;margin-top:14px;border-top:1.5px solid var(--line);padding-top:14px">
+        <div class="label" style="margin-bottom:8px">Массовые действия на WB (рекомендации «Магазин рекомендует»)</div>
+        <div class="row" style="align-items:flex-end">
+          <div class="field grow2">
+            <label class="label" for="recBulkArt">Добавить артикул в рекомендации</label>
+            <input id="recBulkArt" type="text" placeholder="например: J04004/чёрный" autocomplete="off">
+          </div>
+          <div class="field">
+            <label class="label" for="recBulkScope">Куда</label>
+            <select id="recBulkScope">
+              <option value="filter">Текущий фильтр (что в таблице)</option>
+              <option value="all">Все карточки</option>
+            </select>
+          </div>
+          <button class="btn" id="recBulkAddBtn" type="button"><span class="spin"></span><span class="lbl">Добавить в рекомендации</span></button>
+          <button class="btn secondary" id="recBulkClearBtn" type="button"><span class="spin"></span><span class="lbl">Очистить рекомендации</span></button>
+        </div>
+        <div class="status" id="recBulkStatus"></div>
+        <p class="note" style="margin-top:6px">«Добавить» — допишет артикул в рекомендации (не стирая прочее). «Очистить» — удалит все рекомендации у выбранных карточек. Действия применяются сразу на Wildberries.</p>
+      </div>
     </div>
 
     <div id="recResults"></div>
@@ -638,8 +659,8 @@ function recFillPick(){
   arts.forEach(function(c){ html+='<option value="'+esc(c.vendorCode||"")+'">'+esc(c.vendorCode||"—")+' — '+esc(c.title||"")+'</option>'; });
   $("recPick").innerHTML=html;
 }
-function recRenderTable(){
-  if(!REC_ALL.length){ $("recResults").innerHTML=""; return; }
+/* Текущий список с учётом фильтров (артикул/категория/статус) — для таблицы и массовых действий. */
+function recCurrentList(){
   var pick=$("recPick").value, cat=$("recCat").value, flt=$("recFilter").value;
   var list=REC_ALL;
   if(pick) list=list.filter(function(c){return c.vendorCode===pick;});
@@ -648,6 +669,11 @@ function recRenderTable(){
     var s=(REC_STATUS_MAP[c.vendorCode]||{}).status||"";
     return flt==="new"?(!s):(s===flt);
   });
+  return list;
+}
+function recRenderTable(){
+  if(!REC_ALL.length){ $("recResults").innerHTML=""; return; }
+  var list=recCurrentList();
   if(!list.length){ $("recResults").innerHTML='<div class="block"><span class="muted">Нет артикулов под выбранный фильтр.</span></div>'; return; }
   var rows=list.map(function(c){
     var vc=c.vendorCode||"";
@@ -671,11 +697,68 @@ function recRenderTable(){
       var vc=sel.dataset.vc, now=Math.floor(Date.now()/1000);
       REC_STATUS_MAP[vc]={status:sel.value, by:CURRENT_USER, at:now}; recStatusStyle(sel);
       var meta=sel.parentNode.querySelector(".rec-meta"); if(meta) meta.innerHTML=recMetaText(REC_STATUS_MAP[vc]);
-      api("/api/wb/rec-status",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({vendorCode:vc,status:sel.value,by:CURRENT_USER})}).catch(function(){});
+      recSaveStatus(vc,sel.value);
+      if(sel.value==="ok") recApplyToWb(vc, sel, meta);  // по согласованию — бот ставит на WB
     });
   });
 }
+function recSaveStatus(vc,status){
+  api("/api/wb/rec-status",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({vendorCode:vc,status:status,by:CURRENT_USER})}).catch(function(){});
+}
+/* По «Согласовано» — бот ставит комплект бота в рекомендации карточки на WB. */
+async function recApplyToWb(vc, sel, meta){
+  var card=REC_ALL.filter(function(c){return c.vendorCode===vc;})[0];
+  if(!card||!card.nmID) return;
+  var recom=(card.complement||[]).map(function(x){return x.nmID;}).filter(Boolean);
+  if(!recom.length){ showStatus($("recStatus"),false,"У «"+vc+"» бот не подобрал комплект — нечего ставить."); return; }
+  if(!confirm("Поставить рекомендации бота ("+recom.length+" шт.) на карточку «"+vc+"» на Wildberries?")) return;
+  try{
+    var j=await api("/api/wb/recom-set",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({nmID:card.nmID, recom:recom})});
+    if(j.ok){
+      var now=Math.floor(Date.now()/1000);
+      sel.value="wb"; recStatusStyle(sel);
+      REC_STATUS_MAP[vc]={status:"wb",by:CURRENT_USER,at:now};
+      if(meta) meta.innerHTML=recMetaText(REC_STATUS_MAP[vc]);
+      recSaveStatus(vc,"wb");
+      showStatus($("recStatus"),true,"Рекомендации поставлены на WB для «"+vc+"» ("+(j.count||recom.length)+" шт.).");
+    } else {
+      showStatus($("recStatus"),false,"WB: "+(j.error||"не удалось поставить рекомендации"));
+    }
+  }catch(e){ showStatus($("recStatus"),false,"Не удалось связаться с сервером"); }
+}
+/* Массовые действия: добавить артикул в рекомендации / очистить. */
+$("recBulkAddBtn").addEventListener("click",async function(){
+  var artVc=$("recBulkArt").value.trim();
+  if(!artVc){ showStatus($("recBulkStatus"),false,"Укажите артикул"); return; }
+  var recCard=REC_ALL.filter(function(c){return (c.vendorCode||"").toLowerCase()===artVc.toLowerCase();})[0];
+  if(!recCard||!recCard.nmID){ showStatus($("recBulkStatus"),false,"Артикул «"+artVc+"» не найден в каталоге"); return; }
+  var targets=($("recBulkScope").value==="all"?REC_ALL:recCurrentList()).filter(function(c){return c.nmID && c.nmID!==recCard.nmID;});
+  if(!targets.length){ showStatus($("recBulkStatus"),false,"Нет карточек для применения"); return; }
+  if(!confirm("Добавить «"+recCard.vendorCode+"» в рекомендации к "+targets.length+" карточк(ам) на Wildberries?")) return;
+  spinOn($("recBulkAddBtn"),true,"Ставлю на WB…");
+  try{
+    var j=await api("/api/wb/recom-bulk",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"add", recomNmID:recCard.nmID, nmIDs:targets.map(function(c){return c.nmID;})})});
+    if(j.ok) showStatus($("recBulkStatus"),true,"Добавлено «"+recCard.vendorCode+"» в рекомендации у "+(j.applied||targets.length)+" карточек.");
+    else showStatus($("recBulkStatus"),false,"WB: "+(j.error||"ошибка"));
+  }catch(e){ showStatus($("recBulkStatus"),false,"Не удалось связаться с сервером"); }
+  finally{ spinOn($("recBulkAddBtn"),false,"Добавить в рекомендации"); fit(); }
+});
+$("recBulkClearBtn").addEventListener("click",async function(){
+  var targets=($("recBulkScope").value==="all"?REC_ALL:recCurrentList()).filter(function(c){return c.nmID;});
+  if(!targets.length){ showStatus($("recBulkStatus"),false,"Нет карточек"); return; }
+  if(!confirm("Очистить рекомендации у "+targets.length+" карточк(ам) на Wildberries? Удалятся все рекомендации у них.")) return;
+  spinOn($("recBulkClearBtn"),true,"Очищаю…");
+  try{
+    var j=await api("/api/wb/recom-bulk",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"clear", nmIDs:targets.map(function(c){return c.nmID;})})});
+    if(j.ok) showStatus($("recBulkStatus"),true,"Очищены рекомендации у "+(j.applied||targets.length)+" карточек.");
+    else showStatus($("recBulkStatus"),false,"WB: "+(j.error||"ошибка"));
+  }catch(e){ showStatus($("recBulkStatus"),false,"Не удалось связаться с сервером"); }
+  finally{ spinOn($("recBulkClearBtn"),false,"Очистить рекомендации"); fit(); }
+});
 async function loadRecommendations(){
   if(REC_LOADING) return;
   REC_LOADING=true; spinOn($("recRunBtn"),true,"Загружаю…");
@@ -687,6 +770,7 @@ async function loadRecommendations(){
     REC_ALL=j.cards||[];
     try{ var js=await api("/api/wb/rec-status"); REC_STATUS_MAP=(js&&js.ok&&js.statuses)?js.statuses:{}; }catch(e){ REC_STATUS_MAP={}; }
     recFillCats(); recFillPick();
+    $("recBulk").style.display="block";
     showStatus($("recStatus"),true,"Загружено артикулов: "+REC_ALL.length+". Статусы общие для всех. Выберите категорию, затем артикул.");
     recRenderTable();
   }catch(e){ showStatus($("recStatus"),false,"Не удалось связаться с сервером"); }
