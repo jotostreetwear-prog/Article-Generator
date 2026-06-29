@@ -160,9 +160,12 @@ def init_db():
             CREATE TABLE IF NOT EXISTS rec_status (
                 vendor_code TEXT PRIMARY KEY,
                 status      TEXT,
+                updated_by  TEXT,
                 updated_at  BIGINT
             )
         """)
+        # на случай, если таблица уже была создана без колонки автора
+        cur.execute("ALTER TABLE rec_status ADD COLUMN IF NOT EXISTS updated_by TEXT")
         conn.commit()
         cur.close()
         conn.close()
@@ -192,34 +195,38 @@ def db_list_categories():
         return []
 
 def db_get_rec_statuses():
-    """Общие статусы рекомендаций (видны всем): {vendor_code: status}."""
+    """Общие статусы рекомендаций: {vendor_code: {status, by, at}}."""
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT vendor_code, status FROM rec_status")
+        cur.execute("SELECT vendor_code, status, updated_by, updated_at FROM rec_status")
         rows = cur.fetchall()
         cur.close()
         conn.close()
-        return {r[0]: r[1] for r in rows if r[1]}
+        return {r[0]: {"status": r[1], "by": r[2] or "", "at": r[3] or 0}
+                for r in rows if r[1]}
     except Exception as e:
         print(f"Ошибка db_get_rec_statuses: {e}")
         return {}
 
-def db_set_rec_status(vendor_code, status):
+def db_set_rec_status(vendor_code, status, by=""):
     vendor_code = (vendor_code or "").strip()
     if not vendor_code:
         return False
     status = (status or "").strip()
+    by = (by or "").strip()[:120]
     try:
         conn = get_db()
         cur = conn.cursor()
         if status:
             cur.execute("""
-                INSERT INTO rec_status (vendor_code, status, updated_at)
-                VALUES (%s, %s, %s)
+                INSERT INTO rec_status (vendor_code, status, updated_by, updated_at)
+                VALUES (%s, %s, %s, %s)
                 ON CONFLICT (vendor_code)
-                DO UPDATE SET status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
-            """, (vendor_code, status, int(time.time())))
+                DO UPDATE SET status = EXCLUDED.status,
+                             updated_by = EXCLUDED.updated_by,
+                             updated_at = EXCLUDED.updated_at
+            """, (vendor_code, status, by, int(time.time())))
         else:
             cur.execute("DELETE FROM rec_status WHERE vendor_code = %s", (vendor_code,))
         conn.commit()
@@ -1601,7 +1608,7 @@ def api_rec_status_get():
 @app.route("/api/wb/rec-status", methods=["POST"])
 def api_rec_status_set():
     data = request.get_json(silent=True) or {}
-    if db_set_rec_status(data.get("vendorCode"), data.get("status")):
+    if db_set_rec_status(data.get("vendorCode"), data.get("status"), data.get("by")):
         return jsonify({"ok": True})
     return jsonify({"ok": False, "error": "Не удалось сохранить статус"}), 400
 

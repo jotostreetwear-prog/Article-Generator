@@ -462,13 +462,22 @@ td textarea{min-height:40px}
         <b>🧩 Что советует бот</b> — комплект (дополняющие товары), и <b>✅ Статус</b> — отметка менеджера (согласовано / поставлено на WB).
         Выберите артикул или категорию из списка.</p>
       <div class="row" style="margin-top:14px">
-        <div class="field grow2">
-          <label class="label" for="recPick">Артикул</label>
-          <select id="recPick"><option value="">Все артикулы</option></select>
-        </div>
         <div class="field">
           <label class="label" for="recCat">Категория</label>
           <select id="recCat"><option value="">Все категории</option></select>
+        </div>
+        <div class="field grow2">
+          <label class="label" for="recPick">Артикул</label>
+          <select id="recPick"><option value="">Сначала выберите категорию</option></select>
+        </div>
+        <div class="field">
+          <label class="label" for="recFilter">Статус</label>
+          <select id="recFilter">
+            <option value="">Все статусы</option>
+            <option value="new">— новые —</option>
+            <option value="ok">✅ Согласовано</option>
+            <option value="wb">🟢 Поставлено на WB</option>
+          </select>
         </div>
         <button class="btn accent" id="recRunBtn" type="button"><span class="spin"></span><span class="lbl">Подобрать рекомендации</span></button>
       </div>
@@ -522,12 +531,18 @@ td textarea{min-height:40px}
 <script>
 /* ---------- Bitrix embed ---------- */
 function fit(){ try{ if(typeof BX24!=="undefined"&&BX24.fitWindow) BX24.fitWindow(); }catch(e){} }
+var CURRENT_USER="";  // имя текущего менеджера (из Битрикса), для «кто менял статус»
+function bxLoadUser(){
+  try{ BX24.callMethod("user.current",{},function(r){
+    try{ var d=r.data()||{}; CURRENT_USER=((d.NAME||"")+" "+(d.LAST_NAME||"")).trim()||d.EMAIL||(d.ID?("ID "+d.ID):""); }catch(e){}
+  }); }catch(e){}
+}
 (function(){
   var q=location.search||"";
   var inB=/[?&](DOMAIN|APP_SID|AUTH_ID)=/i.test(q)||/bitrix/i.test(document.referrer||"");
   if(!inB) return;
   var s=document.createElement("script"); s.src="//api.bitrix24.com/api/v1/";
-  s.onload=function(){ try{ if(typeof BX24!=="undefined") BX24.init(function(){fit();}); }catch(e){} };
+  s.onload=function(){ try{ if(typeof BX24!=="undefined") BX24.init(function(){fit();bxLoadUser();}); }catch(e){} };
   document.head.appendChild(s);
 })();
 
@@ -601,36 +616,51 @@ function recStatusStyle(sel){
   var s=REC_STATUSES.filter(function(o){return o[0]===sel.value;})[0]||REC_STATUSES[0];
   sel.style.background=s[2]; sel.style.color=s[3]; sel.style.fontWeight="600";
 }
+function recWhen(at){ if(!at) return ""; try{ var d=new Date(at*1000);
+  return d.toLocaleDateString('ru-RU')+' '+d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}); }catch(e){ return ""; } }
+function recMetaText(st){
+  if(!st||!st.status) return "";
+  var parts=[]; if(st.by) parts.push(esc(st.by)); if(st.at) parts.push(recWhen(st.at));
+  return parts.length?("изменил: "+parts.join(" · ")):"";
+}
 function recFillCats(){
   var cats={}; REC_ALL.forEach(function(c){ if(c.subjectName) cats[c.subjectName]=(cats[c.subjectName]||0)+1; });
   var names=Object.keys(cats).sort(function(a,b){return a.localeCompare(b,'ru');});
-  var html='<option value="">Все категории ('+REC_ALL.length+')</option>';
+  var html='<option value="">Все категории ('+names.length+')</option>';
   names.forEach(function(n){ html+='<option value="'+esc(n)+'">'+esc(n)+' ('+cats[n]+')</option>'; });
   $("recCat").innerHTML=html;
 }
+/* Артикулы в списке — только выбранной категории (не грузим все 162). */
 function recFillPick(){
-  var html='<option value="">Все артикулы ('+REC_ALL.length+')</option>';
-  REC_ALL.forEach(function(c){ html+='<option value="'+esc(c.vendorCode||"")+'">'+esc(c.vendorCode||"—")+' — '+esc(c.title||"")+'</option>'; });
+  var cat=$("recCat").value;
+  var arts=cat?REC_ALL.filter(function(c){return (c.subjectName||"")===cat;}):[];
+  var html='<option value="">'+(cat?('Все артикулы категории ('+arts.length+')'):'Сначала выберите категорию')+'</option>';
+  arts.forEach(function(c){ html+='<option value="'+esc(c.vendorCode||"")+'">'+esc(c.vendorCode||"—")+' — '+esc(c.title||"")+'</option>'; });
   $("recPick").innerHTML=html;
 }
 function recRenderTable(){
   if(!REC_ALL.length){ $("recResults").innerHTML=""; return; }
-  var pick=$("recPick").value, cat=$("recCat").value;
+  var pick=$("recPick").value, cat=$("recCat").value, flt=$("recFilter").value;
   var list=REC_ALL;
-  if(pick) list=REC_ALL.filter(function(c){return c.vendorCode===pick;});
-  else if(cat) list=REC_ALL.filter(function(c){return (c.subjectName||"")===cat;});
+  if(pick) list=list.filter(function(c){return c.vendorCode===pick;});
+  else if(cat) list=list.filter(function(c){return (c.subjectName||"")===cat;});
+  if(flt) list=list.filter(function(c){
+    var s=(REC_STATUS_MAP[c.vendorCode]||{}).status||"";
+    return flt==="new"?(!s):(s===flt);
+  });
   if(!list.length){ $("recResults").innerHTML='<div class="block"><span class="muted">Нет артикулов под выбранный фильтр.</span></div>'; return; }
   var rows=list.map(function(c){
     var vc=c.vendorCode||"";
-    var cur=REC_STATUS_MAP[vc]||"";
-    var opts=REC_STATUSES.map(function(o){ return '<option value="'+o[0]+'"'+(cur===o[0]?" selected":"")+'>'+o[1]+'</option>'; }).join("");
+    var st=REC_STATUS_MAP[vc]||{};
+    var opts=REC_STATUSES.map(function(o){ return '<option value="'+o[0]+'"'+((st.status||"")===o[0]?" selected":"")+'>'+o[1]+'</option>'; }).join("");
     return '<tr><td style="white-space:nowrap"><div style="display:flex;gap:10px;align-items:flex-start">'+recThumb(c.photo)
       +'<div><b class="pick-vc">'+esc(vc||"—")+'</b>'
       +'<div class="muted">'+esc(c.title||"")+'<br>'+esc(c.subjectName||"")+(c.color?(' · '+esc(c.color)):"")+'</div></div></div></td>'
       +'<td>'+recCell(c.recommended_by,"пока нигде не рекомендуется")+'</td>'
       +'<td style="min-width:300px">'+recCell(c.complement,"нет дополняющих в каталоге")
         +'<div style="margin-top:8px">'+recAdvice(c)+'</div></td>'
-      +'<td><select class="rec-status" data-vc="'+esc(vc)+'" style="min-width:170px">'+opts+'</select></td></tr>';
+      +'<td><select class="rec-status" data-vc="'+esc(vc)+'" style="min-width:170px">'+opts+'</select>'
+        +'<div class="rec-meta muted" style="font-size:11px;margin-top:5px">'+recMetaText(st)+'</div></td></tr>';
   }).join("");
   $("recResults").innerHTML='<div class="block"><div class="tbl-wrap"><table><thead><tr>'
     +'<th>Товар</th><th>🔗 Сейчас рекомендуется в товарах</th><th>🧩 Что советует бот</th><th>✅ Статус</th>'
@@ -638,9 +668,11 @@ function recRenderTable(){
   $("recResults").querySelectorAll(".rec-status").forEach(function(sel){
     recStatusStyle(sel);
     sel.addEventListener("change",function(){
-      REC_STATUS_MAP[sel.dataset.vc]=sel.value; recStatusStyle(sel);
+      var vc=sel.dataset.vc, now=Math.floor(Date.now()/1000);
+      REC_STATUS_MAP[vc]={status:sel.value, by:CURRENT_USER, at:now}; recStatusStyle(sel);
+      var meta=sel.parentNode.querySelector(".rec-meta"); if(meta) meta.innerHTML=recMetaText(REC_STATUS_MAP[vc]);
       api("/api/wb/rec-status",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({vendorCode:sel.dataset.vc,status:sel.value})}).catch(function(){});
+        body:JSON.stringify({vendorCode:vc,status:sel.value,by:CURRENT_USER})}).catch(function(){});
     });
   });
 }
@@ -654,15 +686,16 @@ async function loadRecommendations(){
     if((j.count||0)===0){ showStatus($("recStatus"),false,"Артикулы не найдены"); return; }
     REC_ALL=j.cards||[];
     try{ var js=await api("/api/wb/rec-status"); REC_STATUS_MAP=(js&&js.ok&&js.statuses)?js.statuses:{}; }catch(e){ REC_STATUS_MAP={}; }
-    recFillPick(); recFillCats();
-    showStatus($("recStatus"),true,"Загружено артикулов: "+REC_ALL.length+". Статусы общие для всех. Выберите артикул или категорию.");
+    recFillCats(); recFillPick();
+    showStatus($("recStatus"),true,"Загружено артикулов: "+REC_ALL.length+". Статусы общие для всех. Выберите категорию, затем артикул.");
     recRenderTable();
   }catch(e){ showStatus($("recStatus"),false,"Не удалось связаться с сервером"); }
   finally{ spinOn($("recRunBtn"),false,"Обновить"); REC_LOADING=false; fit(); }
 }
 $("recRunBtn").addEventListener("click",loadRecommendations);
-$("recPick").addEventListener("change",function(){ if($("recPick").value) $("recCat").value=""; recRenderTable(); });
-$("recCat").addEventListener("change",function(){ if($("recCat").value) $("recPick").value=""; recRenderTable(); });
+$("recCat").addEventListener("change",function(){ recFillPick(); recRenderTable(); });
+$("recPick").addEventListener("change",recRenderTable);
+$("recFilter").addEventListener("change",recRenderTable);
 
 /* ============================================================
    РЕДАКТИРОВАНИЕ
