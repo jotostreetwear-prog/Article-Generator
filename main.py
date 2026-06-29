@@ -1228,6 +1228,20 @@ def wb_fetch_cards(text_search="", limit=100, max_cards=1000):
         cursor = {"limit": page, "updatedAt": cur.get("updatedAt"), "nmID": cur.get("nmID")}
     return cards[:max_cards]
 
+def _first_photo_url(c):
+    """URL первой фотографии карточки (миниатюра) для предпросмотра/рекомендаций."""
+    ph = c.get("photos") or []
+    if not ph:
+        return ""
+    p = ph[0]
+    if isinstance(p, str):
+        return p
+    if isinstance(p, dict):
+        for k in ("tm", "square", "c246x328", "c516x688", "big"):
+            if p.get(k):
+                return p[k]
+    return ""
+
 def simplify_card(c):
     """Облегчённое представление карточки для интерфейса + сырой объект для обновления."""
     barcodes = []
@@ -1245,6 +1259,7 @@ def simplify_card(c):
         "subjectName": c.get("subjectName"),
         "barcodes": barcodes,
         "photos": len(c.get("photos") or []),
+        "photo": _first_photo_url(c),
         "characteristics": [
             {"id": ch.get("id"), "name": ch.get("name"), "value": ch.get("value")}
             for ch in (c.get("characteristics") or [])
@@ -1301,7 +1316,7 @@ def _rec_color(card):
 def _rec_brief(card):
     return {"nmID": card.get("nmID"), "vendorCode": card.get("vendorCode"),
             "title": card.get("title"), "subjectName": card.get("subjectName"),
-            "color": card.get("_color", "")}
+            "color": card.get("_color", ""), "photo": card.get("photo", "")}
 
 def product_recommendations(simplified, top=5):
     """Для каждого артикула подбирает, какие ДРУГИЕ артикулы рекомендовать:
@@ -1331,7 +1346,7 @@ def product_recommendations(simplified, top=5):
         out.append({
             "nmID": a.get("nmID"), "vendorCode": a.get("vendorCode"),
             "title": a.get("title"), "subjectName": a.get("subjectName"),
-            "color": ac, "group": ag,
+            "color": ac, "group": ag, "photo": a.get("photo", ""),
             "similar": [_rec_brief(b) for b in similar[:top]],
             "complement": [_rec_brief(b) for b in complement[:top]],
         })
@@ -1373,16 +1388,18 @@ def wb_generate_barcodes(count):
     return []
 
 def wb_search_subjects(name="", limit=200):
-    params = {"locale": "ru", "limit": limit}
-    if name:
-        params["name"] = name
+    q = (name or "").strip()
+    params = {"locale": "ru", "limit": max(int(limit or 200), 200)}
+    if q:
+        # В WB шлём ОСНОВУ слова (стем): «футболки/футболку» → «футболк»,
+        # тогда WB вернёт все формы и связанные категории, а не точное слово.
+        params["name"] = _stem(q)
     data = wb_content_request("GET", "/content/v2/object/all", params=params)
     subjects = data.get("data", []) or []
-    # WB-фильтр по name капризный (регистр/частичное совпадение) и иногда
-    # возвращает пусто даже для существующей категории. Подстрахуемся:
-    # грузим каталог постранично и фильтруем по подстроке сами.
-    if name and not subjects:
-        q = name.strip().lower()
+    # WB-фильтр по name капризный и иногда возвращает пусто. Подстрахуемся:
+    # грузим каталог постранично и фильтруем по основе слова сами.
+    if q and not subjects:
+        st = _stem(q)
         found = []
         offset = 0
         for _ in range(12):  # каталог WB ~8–9k предметов → до 12k хватает
@@ -1391,7 +1408,7 @@ def wb_search_subjects(name="", limit=200):
             batch = d.get("data", []) or []
             if not batch:
                 break
-            found.extend([s for s in batch if q in (s.get("subjectName") or "").lower()])
+            found.extend([s for s in batch if st in _norm_txt(s.get("subjectName"))])
             if len(batch) < 1000:
                 break
             offset += 1000
@@ -1474,6 +1491,21 @@ def api_wb_cards():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
 
+def _norm_txt(s):
+    return (s or "").lower().replace("ё", "е")
+
+def _stem(q):
+    """Грубый стем: отрезаем типичные русские окончания, чтобы «футболки»,
+    «футболка», «футболку» совпадали (поиск по подстроке-основе)."""
+    q = _norm_txt(q).strip()
+    # Отрезаем только падежные окончания, не трогая основу (без «ки/ка»,
+    # чтобы «футболки» → «футболк», а не «футбол» = «футбольный»).
+    for suf in ("ами", "ями", "ах", "ях", "ов", "ев",
+                "ы", "и", "а", "я", "у", "ю", "е", "о", "ь"):
+        if len(q) > 4 and q.endswith(suf):
+            return q[:-len(suf)]
+    return q
+
 @app.route("/api/wb/recommendations", methods=["GET"])
 def api_wb_recommendations():
     """Для каждого артикула — какие другие артикулы рекомендовать (похожие + комплект)."""
@@ -1490,10 +1522,14 @@ def api_wb_recommendations():
         recs = product_recommendations(simplified, top=top)
         # Вывод фильтруем по поиску, но сам подбор — по всему каталогу.
         if search:
-            q = search.lower()
-            recs = [r for r in recs
-                    if q in (r.get("vendorCode") or "").lower()
-                    or q in (r.get("title") or "").lower()]
+            q = _norm_txt(search)
+            st = _stem(search)
+            def hit(r):
+                blob = _norm_txt((r.get("vendorCode") or "") + " "
+                                 + (r.get("title") or "") + " "
+                                 + (r.get("subjectName") or ""))
+                return q in blob or (st and st in blob)
+            recs = [r for r in recs if hit(r)]
         return jsonify({"ok": True, "count": len(recs),
                         "total_catalog": len(simplified), "cards": recs})
     except Exception as e:
