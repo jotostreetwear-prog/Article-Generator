@@ -399,6 +399,7 @@ td textarea{min-height:40px}
         <div class="row" style="margin-top:6px">
           <input type="file" id="nkFile" accept=".xlsx" style="flex:1;min-width:220px">
           <button class="btn secondary" id="nkFileBtn" type="button"><span class="spin"></span><span class="lbl">Загрузить файл</span></button>
+          <button class="btn secondary" id="nkClearBtn" type="button" style="display:none">Удалить файл</button>
         </div>
         <div class="status" id="nkFileResult"></div>
         <div id="filePreview" style="margin-top:12px"></div>
@@ -1050,6 +1051,7 @@ function applyNkRows(j){
     FILE_GROUPS[a].sizes.push({size:row.size, gtin:row.gtin});
   });
   renderFilePreview();
+  $("nkClearBtn").style.display="";
   var msg="Артикулов: "+(j.articles||Object.keys(FILE_GROUPS).length)+", строк (размеров): "+j.count+", из них с ГТИН: "+j.with_gtin+".";
   if(j.with_gtin===0) msg+=" ⚠ ГТИНы пустые — товары ещё не промодерированы в ЧЗ (нет присвоенных ГТИНов).";
   else msg+=" Проверьте предпросмотр и создайте карточки на WB.";
@@ -1072,6 +1074,20 @@ $("nkFileBtn").addEventListener("click",async function(){
     applyNkRows(j);
   }catch(e){ showStatus($("nkFileResult"),false,"Не удалось загрузить файл"); }
   finally{ spinOn($("nkFileBtn"),false,"Загрузить файл"); fit(); }
+});
+
+/* Удалить загруженный файл — сбрасываем выбор, разбор и предпросмотр */
+$("nkClearBtn").addEventListener("click",function(){
+  FILE_GROUPS=null;
+  $("nkFile").value="";
+  $("filePreview").innerHTML="";
+  $("createFromFileBtn").style.display="none";
+  $("nkClearBtn").style.display="none";
+  $("nkFileResult").className="status";
+  $("nkFileResult").textContent="";
+  $("fileCreateStatus").className="status";
+  $("fileCreateStatus").textContent="";
+  fit();
 });
 
 $("createFromFileBtn").addEventListener("click",async function(){
