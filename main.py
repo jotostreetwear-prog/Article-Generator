@@ -156,6 +156,13 @@ def init_db():
                 code VARCHAR(2) NOT NULL UNIQUE
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS rec_status (
+                vendor_code TEXT PRIMARY KEY,
+                status      TEXT,
+                updated_at  BIGINT
+            )
+        """)
         conn.commit()
         cur.close()
         conn.close()
@@ -183,6 +190,45 @@ def db_list_categories():
     except Exception as e:
         print(f"Ошибка db_list_categories: {e}")
         return []
+
+def db_get_rec_statuses():
+    """Общие статусы рекомендаций (видны всем): {vendor_code: status}."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("SELECT vendor_code, status FROM rec_status")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return {r[0]: r[1] for r in rows if r[1]}
+    except Exception as e:
+        print(f"Ошибка db_get_rec_statuses: {e}")
+        return {}
+
+def db_set_rec_status(vendor_code, status):
+    vendor_code = (vendor_code or "").strip()
+    if not vendor_code:
+        return False
+    status = (status or "").strip()
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        if status:
+            cur.execute("""
+                INSERT INTO rec_status (vendor_code, status, updated_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (vendor_code)
+                DO UPDATE SET status = EXCLUDED.status, updated_at = EXCLUDED.updated_at
+            """, (vendor_code, status, int(time.time())))
+        else:
+            cur.execute("DELETE FROM rec_status WHERE vendor_code = %s", (vendor_code,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Ошибка db_set_rec_status: {e}")
+        return False
 
 def resolve_category_code(name):
     name = (name or "").strip().lower()
@@ -1546,6 +1592,18 @@ def api_wb_recommendations():
                         "total_catalog": len(simplified), "cards": recs})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 502
+
+@app.route("/api/wb/rec-status", methods=["GET"])
+def api_rec_status_get():
+    """Общие статусы рекомендаций (для всех менеджеров)."""
+    return jsonify({"ok": True, "statuses": db_get_rec_statuses()})
+
+@app.route("/api/wb/rec-status", methods=["POST"])
+def api_rec_status_set():
+    data = request.get_json(silent=True) or {}
+    if db_set_rec_status(data.get("vendorCode"), data.get("status")):
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "Не удалось сохранить статус"}), 400
 
 @app.route("/api/wb/bulk-edit", methods=["POST"])
 def api_wb_bulk_edit():
