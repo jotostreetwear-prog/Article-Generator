@@ -189,7 +189,10 @@ td textarea{min-height:40px}
 .nov-num{width:30px;height:30px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:700;font-size:13px}
 .nov-num.done{background:#23a55a}
 .nov-body{flex:1;padding-bottom:18px;min-width:0}
-.nov-stitle{font-weight:700;font-size:15px;margin-top:4px}
+.nov-stitle-row{display:flex;align-items:center;gap:10px;justify-content:space-between;flex-wrap:wrap;margin-top:4px}
+.nov-stitle{font-weight:700;font-size:15px}
+.nov-sdate{font-size:11.5px;padding:4px 7px;border-radius:7px;border:1.5px solid var(--line);color:var(--ink-2);flex:none}
+.nov-sdate.overdue{border-color:var(--err);color:var(--err);font-weight:700}
 .nov-ssub{font-size:12.5px;color:var(--ink-2);margin:3px 0 6px}
 .nov-sub{margin:8px 0 4px;font-weight:600;font-size:13.5px;color:var(--ink)}
 .nov-note{font-size:12px;color:var(--ink-3);margin:2px 0 2px 2px}
@@ -1585,8 +1588,8 @@ function novDate(at){ try{ var d=new Date(at*1000);
 var NOV_DATA=null, NOV_LOADING=false;
 async function loadNovelty(){
   NOV_LOADING=true;
-  try{ var j=await api("/api/novelty"); NOV_DATA=(j&&j.ok)?{items:j.items||[],checks:j.checks||{}}:{items:[],checks:{}}; }
-  catch(e){ NOV_DATA={items:[],checks:{}}; }
+  try{ var j=await api("/api/novelty"); NOV_DATA=(j&&j.ok)?{items:j.items||[],checks:j.checks||{},stage_dates:j.stage_dates||{}}:{items:[],checks:{},stage_dates:{}}; }
+  catch(e){ NOV_DATA={items:[],checks:{},stage_dates:{}}; }
   NOV_LOADING=false;
   renderNovelty();
 }
@@ -1598,12 +1601,25 @@ function novItemHtml(art,it){
     +'<input type="checkbox" data-art="'+esc(art)+'" data-key="'+esc(it.key)+'"'+(on?' checked':'')+'>'
     +'<span class="nov-lbl">'+esc(it.label)+'</span>'+meta+'</label>';
 }
+function novStageOverdue(art,sk,date){
+  if(!date) return false;
+  try{ var t=new Date(); t.setHours(0,0,0,0); if(new Date(date)>=t) return false; }catch(e){ return false; }
+  var idx=parseInt(String(sk).replace("st",""),10)-1;
+  var st=NOVELTY_STAGES[idx]; if(!st) return false;
+  var its=stageItemKeys(st), checks=NOV_DATA.checks[art]||{};
+  var done=its.filter(function(k){return checks[k]&&checks[k].checked;}).length;
+  return its.length>0 && done<its.length;
+}
 function novStageHtml(art,st,idx){
   var its=stageItemKeys(st), checks=NOV_DATA.checks[art]||{};
   var done=its.filter(function(k){return checks[k]&&checks[k].checked;}).length;
   var full=its.length>0&&done===its.length;
+  var sk="st"+(idx+1);
+  var sd=((NOV_DATA.stage_dates||{})[art]||{})[sk]||"";
+  var over=novStageOverdue(art,sk,sd);
   var h='<div class="nov-stage"><div class="nov-rail"><span class="nov-num'+(full?' done':'')+'">'+(idx+1)+'</span></div><div class="nov-body">';
-  h+='<div class="nov-stitle">'+esc(st.title)+'</div>';
+  h+='<div class="nov-stitle-row"><div class="nov-stitle">'+esc(st.title)+'</div>'
+    +'<input class="nov-sdate'+(over?' overdue':'')+'" type="date" data-art="'+esc(art)+'" data-stage="'+sk+'" value="'+esc(sd)+'" title="Срок этапа"></div>';
   if(st.sub) h+='<div class="nov-ssub">'+esc(st.sub)+'</div>';
   (st.items||[]).forEach(function(it){ h+=novItemHtml(art,it); });
   (st.subs||[]).forEach(function(sb){
@@ -1681,6 +1697,7 @@ function renderNovelty(){
   $("novList").querySelectorAll(".nov-remind").forEach(function(b){ b.addEventListener("click",function(){ novRemind(b.dataset.art); }); });
   $("novList").querySelectorAll(".nov-status-sel").forEach(function(s){ s.addEventListener("change",function(){ novSetStatus(s); }); });
   $("novList").querySelectorAll(".nov-date").forEach(function(d){ d.addEventListener("change",function(){ novSetDate(d); }); });
+  $("novList").querySelectorAll(".nov-sdate").forEach(function(d){ d.addEventListener("change",function(){ novSetStageDate(d); }); });
   $("novList").querySelectorAll(".nov-toggle").forEach(function(b){ b.addEventListener("click",function(){ var c=b.closest(".nov-card"); c.classList.toggle("collapsed"); b.textContent=c.classList.contains("collapsed")?"▸":"▾"; fit(); }); });
   fit();
 }
@@ -1699,6 +1716,20 @@ function novUpdateProgress(card,art){
   });
   var dInp=card.querySelector(".nov-date");
   if(dInp){ dInp.classList.toggle("overdue", novOverdue(novItemByArt(art),done,all.length)); }
+  stages.forEach(function(stEl,i){
+    var sd=stEl.querySelector(".nov-sdate");
+    if(sd) sd.classList.toggle("overdue", novStageOverdue(art,"st"+(i+1),sd.value));
+  });
+}
+function novSetStageDate(inp){
+  var art=inp.dataset.art, sk=inp.dataset.stage, v=inp.value;
+  NOV_DATA.stage_dates=NOV_DATA.stage_dates||{};
+  NOV_DATA.stage_dates[art]=NOV_DATA.stage_dates[art]||{};
+  if(v) NOV_DATA.stage_dates[art][sk]=v; else delete NOV_DATA.stage_dates[art][sk];
+  inp.classList.toggle("overdue", novStageOverdue(art,sk,v));
+  api("/api/novelty/stage-date",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({article:art,stage_key:sk,due_date:v})})
+    .then(function(j){ if(!j||!j.ok) showStatus($("novStatus"),false,"Срок этапа не сохранён"); })
+    .catch(function(){ showStatus($("novStatus"),false,"Нет связи — срок этапа не сохранён"); });
 }
 function novSetStatus(sel){
   var art=sel.dataset.art, v=sel.value;

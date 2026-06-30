@@ -194,6 +194,14 @@ def init_db():
                 PRIMARY KEY (article, item_key)
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS novelty_stage_dates (
+                article   TEXT,
+                stage_key TEXT,
+                due_date  TEXT,
+                PRIMARY KEY (article, stage_key)
+            )
+        """)
         conn.commit()
         cur.close()
         conn.close()
@@ -281,12 +289,20 @@ def db_novelty_get():
         checks = {}
         for r in cur.fetchall():
             checks.setdefault(r[0], {})[r[1]] = {"checked": bool(r[2]), "by": r[3] or "", "at": r[4] or 0}
+        stage_dates = {}
+        try:
+            cur.execute("SELECT article, stage_key, due_date FROM novelty_stage_dates")
+            for r in cur.fetchall():
+                if r[2]:
+                    stage_dates.setdefault(r[0], {})[r[1]] = r[2]
+        except Exception:
+            pass
         cur.close()
         conn.close()
-        return {"items": items, "checks": checks}
+        return {"items": items, "checks": checks, "stage_dates": stage_dates}
     except Exception as e:
         print(f"Ошибка db_novelty_get: {e}")
-        return {"items": [], "checks": {}}
+        return {"items": [], "checks": {}, "stage_dates": {}}
 
 def db_novelty_add(article, title="", by=""):
     article = (article or "").strip()
@@ -319,6 +335,7 @@ def db_novelty_remove(article):
         conn = get_db()
         cur = conn.cursor()
         cur.execute("DELETE FROM novelty_checks WHERE article = %s", (article,))
+        cur.execute("DELETE FROM novelty_stage_dates WHERE article = %s", (article,))
         cur.execute("DELETE FROM novelty_items WHERE article = %s", (article,))
         conn.commit()
         cur.close()
@@ -373,6 +390,33 @@ def db_novelty_set_date(article, launch_date):
         return True
     except Exception as e:
         print(f"Ошибка db_novelty_set_date: {e}")
+        return False
+
+def db_novelty_set_stage_date(article, stage_key, due_date):
+    article = (article or "").strip()
+    stage_key = (stage_key or "").strip()[:40]
+    if not article or not stage_key:
+        return False
+    due_date = (due_date or "").strip()[:20]
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        if due_date:
+            cur.execute("""
+                INSERT INTO novelty_stage_dates (article, stage_key, due_date)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (article, stage_key)
+                DO UPDATE SET due_date = EXCLUDED.due_date
+            """, (article, stage_key, due_date))
+        else:
+            cur.execute("DELETE FROM novelty_stage_dates WHERE article = %s AND stage_key = %s",
+                        (article, stage_key))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Ошибка db_novelty_set_stage_date: {e}")
         return False
 
 def db_novelty_set_check(article, item_key, checked, by=""):
@@ -1893,7 +1937,8 @@ def api_novelty_get():
     """Список новинок и отметки по пунктам чек-листа (общие для всех)."""
     data = db_novelty_get()
     items = _novelty_enrich(data["items"])
-    return jsonify({"ok": True, "items": items, "checks": data["checks"]})
+    return jsonify({"ok": True, "items": items, "checks": data["checks"],
+                    "stage_dates": data.get("stage_dates", {})})
 
 @app.route("/api/novelty/add", methods=["POST"])
 def api_novelty_add():
@@ -1930,6 +1975,13 @@ def api_novelty_date():
     if db_novelty_set_date(data.get("article"), data.get("launch_date")):
         return jsonify({"ok": True})
     return jsonify({"ok": False, "error": "Не удалось сохранить дату"}), 400
+
+@app.route("/api/novelty/stage-date", methods=["POST"])
+def api_novelty_stage_date():
+    data = request.get_json(silent=True) or {}
+    if db_novelty_set_stage_date(data.get("article"), data.get("stage_key"), data.get("due_date")):
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "Не удалось сохранить срок этапа"}), 400
 
 def _to_int_list(v):
     out = []
