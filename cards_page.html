@@ -161,7 +161,26 @@ td textarea{min-height:40px}
 .tbl-wrap{overflow:auto;border:1.5px solid var(--line);border-radius:var(--r)}
 .del-row{background:transparent;border:1px solid var(--line);color:var(--err);border-radius:8px;cursor:pointer;font-size:16px;width:30px;height:30px;line-height:1}
 /* ---- Чек-лист новинок (схема этапов) ---- */
+.nov-card{padding:16px 18px}
+.nov-card.collapsed .nov-bodywrap{display:none}
+.nov-bodywrap{margin-top:16px}
 .nov-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.nov-toggle{border:none;background:transparent;cursor:pointer;font-size:13px;color:var(--ink-2);flex:none;width:20px;padding:0}
+.nov-thumb{width:44px;height:58px;border-radius:8px;object-fit:cover;background:var(--surface-2);border:1px solid var(--line);flex:none}
+.nov-thumb.ph{display:grid;place-items:center;color:var(--ink-3);font-size:18px}
+.nov-art{font-family:var(--mono);font-weight:700;font-size:16px}
+.nov-name{color:var(--ink-2);font-size:13px}
+.nov-wb{font-size:12px;color:var(--accent-deep);text-decoration:none;white-space:nowrap}
+.nov-wb:hover{text-decoration:underline}
+.nov-pct{font-size:12px;color:var(--ink-2);font-weight:700;min-width:38px;text-align:right}
+.nov-date{font-size:12px;padding:5px 8px;border-radius:8px;border:1.5px solid var(--line);color:var(--ink)}
+.nov-date.overdue{border-color:var(--err);color:var(--err);font-weight:700}
+.nov-status-sel{font-size:12px;padding:6px 10px;border-radius:20px;border:1.5px solid var(--line);cursor:pointer;font-weight:700}
+.nov-status-sel[data-s="new"]{color:#2563eb;border-color:#bcd0ff;background:#eef4ff}
+.nov-status-sel[data-s="work"]{color:#b26a00;border-color:#ffd9a0;background:#fff6e9}
+.nov-status-sel[data-s="ready"]{color:#1a8a4f;border-color:#bfe6cd;background:#e9f9f0}
+.nov-status-sel[data-s="launched"]{color:#7c3aed;border-color:#ddc9ff;background:#f4eeff}
+.nov-status-sel[data-s="scaled"]{color:#0d8a8a;border-color:#b6e6e6;background:#e8fafa}
 .nov-bar{height:8px;border-radius:6px;background:var(--line);overflow:hidden;flex:1;min-width:120px}
 .nov-bar-fill{height:100%;background:var(--accent);width:0;transition:width .25s}
 .nov-stage{display:flex;gap:14px;position:relative}
@@ -178,9 +197,7 @@ td textarea{min-height:40px}
 .nov-item input{width:18px;height:18px;flex:none;margin-top:1px;cursor:pointer}
 .nov-item.checked span.nov-lbl{color:var(--ink-3);text-decoration:line-through}
 .nov-meta{font-size:11px;color:var(--ink-3);margin-left:auto;white-space:nowrap;padding-left:8px}
-.nov-card>summary{list-style:none;outline:none}
-.nov-card>summary::-webkit-details-marker{display:none}
-.nov-card[open]>summary{margin-bottom:6px}
+.nov-grow{flex:1;min-width:60px}
 .charcs{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;margin-top:6px}
 .charc-tag{font-size:10px;color:var(--err);font-weight:700;letter-spacing:.05em}
 #theme-toggle{width:38px;height:38px;border-radius:50%;cursor:pointer;display:grid;place-items:center;font-size:14px;
@@ -534,6 +551,11 @@ td textarea{min-height:40px}
         <button class="btn secondary" id="novReloadBtn" type="button"><span class="spin"></span><span class="lbl">Обновить</span></button>
       </div>
       <div class="status" id="novStatus"></div>
+      <div class="row" style="margin-top:12px">
+        <div class="field"><label class="label" for="novFilterStatus">Фильтр по статусу</label><select id="novFilterStatus"><option value="">Все статусы</option></select></div>
+        <div class="field grow2"><label class="label" for="novSearch">Поиск (артикул / название)</label><input id="novSearch" type="text" placeholder="напр. J090 или худи" autocomplete="off"></div>
+        <div class="field"><label class="label" for="novSort">Сортировка</label><select id="novSort"><option value="new">Сначала новые</option><option value="progress">По прогрессу</option><option value="date">По дате запуска</option></select></div>
+      </div>
     </div>
     <div id="novList"></div>
   </section>
@@ -1423,8 +1445,8 @@ $("artCreateBtn").addEventListener("click",async function(){
       $("artUndoBtn").dataset.armed="0"; $("artUndoBtn").innerHTML="🗑 Удалить артикул"; $("artUndoBtn").disabled=false;
       artRefreshHint();
       bxCreateChzTask(j.article,(j.category_title||"")+" · "+(j.color||"")); // задача Дарье на ЧЗ
-      // новинка автоматически попадает в чек-лист запуска
-      api("/api/novelty/add",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({article:j.article,title:((j.category_title||"")+(j.color?(" "+j.color):"")).trim(),by:CURRENT_USER})})
+      // новинка автоматически попадает в чек-лист запуска (артикул модели без цвета)
+      api("/api/novelty/add",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({article:String(j.article||"").split("/")[0],title:((j.category_title||"")+(j.color?(" "+j.color):"")).trim(),by:CURRENT_USER})})
         .then(function(){ if(NOV_DATA!==null) loadNovelty(); }).catch(function(){});
     } else showStatus($("artStatus"),false,(j&&j.error)?j.error:"Не удалось создать артикул");
   }catch(e){ showStatus($("artStatus"),false,"Не удалось связаться с сервером"); }
@@ -1579,41 +1601,127 @@ function novStageHtml(art,st,idx){
   h+='</div></div>';
   return h;
 }
+var NOV_STATUSES=[
+  {v:"new",label:"🆕 Новая"},
+  {v:"work",label:"🛠 В работе"},
+  {v:"ready",label:"✅ Готова к запуску"},
+  {v:"launched",label:"🚀 Запущена"},
+  {v:"scaled",label:"📈 Масштабируется"}
+];
+var TATYANA_RESPONSIBLE_ID=232; // Татьяна-менеджер (Bitrix24 ID, профиль /user/232/)
+var NOV_LABELS={};
+NOVELTY_STAGES.forEach(function(st){
+  (st.items||[]).forEach(function(it){ NOV_LABELS[it.key]=it.label; });
+  (st.subs||[]).forEach(function(sb){ (sb.items||[]).forEach(function(it){ NOV_LABELS[it.key]=it.label; }); });
+});
+function novStatusOptions(sel){ return NOV_STATUSES.map(function(s){ return '<option value="'+s.v+'"'+(s.v===sel?' selected':'')+'>'+s.label+'</option>'; }).join(""); }
+function novItemByArt(art){ var r=null; (NOV_DATA.items||[]).forEach(function(it){ if(it.article===art) r=it; }); return r; }
+function novProgress(art){ var c=NOV_DATA.checks[art]||{}; return novAllKeys().filter(function(k){return c[k]&&c[k].checked;}).length; }
+function novOverdue(o,done,total){
+  if(!o||!o.launch_date||done>=total) return false;
+  try{ var t=new Date(); t.setHours(0,0,0,0); return new Date(o.launch_date)<t; }catch(e){ return false; }
+}
+function novVisibleItems(){
+  var items=(NOV_DATA.items||[]).slice();
+  var fs=$("novFilterStatus")?$("novFilterStatus").value:"";
+  var q=($("novSearch")?$("novSearch").value:"").trim().toLowerCase();
+  var sort=$("novSort")?$("novSort").value:"new";
+  if(fs) items=items.filter(function(o){ return (o.status||"new")===fs; });
+  if(q) items=items.filter(function(o){ return (o.article||"").toLowerCase().indexOf(q)>=0 || (o.title||"").toLowerCase().indexOf(q)>=0; });
+  if(sort==="progress") items.sort(function(a,b){ return novProgress(b.article)-novProgress(a.article); });
+  else if(sort==="date") items.sort(function(a,b){ return (a.launch_date||"9999-99-99").localeCompare(b.launch_date||"9999-99-99"); });
+  return items;
+}
 function renderNovelty(){
   if(!NOV_DATA){ return; }
-  var items=NOV_DATA.items||[], all=novAllKeys();
-  if(!items.length){ $("novList").innerHTML='<div class="block"><div class="muted">Пока нет новинок. Добавьте артикул выше — по нему появится чек-лист запуска. Новые артикулы из вкладки «Генерация» добавляются сюда автоматически.</div></div>'; fit(); return; }
+  var total=(NOV_DATA.items||[]).length, all=novAllKeys();
+  if(!total){ $("novList").innerHTML='<div class="block"><div class="muted">Пока нет новинок. Добавьте артикул выше — по нему появится чек-лист запуска. Новые артикулы из вкладки «Генерация» добавляются сюда автоматически.</div></div>'; fit(); return; }
+  var items=novVisibleItems();
+  if(!items.length){ $("novList").innerHTML='<div class="block"><div class="muted">Ничего не найдено по выбранному фильтру.</div></div>'; fit(); return; }
   $("novList").innerHTML=items.map(function(o){
     var art=o.article, checks=NOV_DATA.checks[art]||{};
     var done=all.filter(function(k){return checks[k]&&checks[k].checked;}).length;
     var pct=all.length?Math.round(done*100/all.length):0;
-    var head='<div class="nov-head"><b class="pick-vc">'+esc(art)+'</b>'
-      +(o.title?(' <span class="muted">'+esc(o.title)+'</span>'):'')
+    var st=o.status||"new";
+    var thumb=o.photo?('<img class="nov-thumb" src="'+esc(o.photo)+'" alt="" loading="lazy">'):'<div class="nov-thumb ph">📦</div>';
+    var wb=o.wb_url?('<a class="nov-wb" href="'+esc(o.wb_url)+'" target="_blank" rel="noopener">Карточка WB ↗</a>'):'';
+    var over=novOverdue(o,done,all.length);
+    var head='<div class="nov-head">'
+      +'<button class="nov-toggle" type="button" title="Свернуть/развернуть">▾</button>'
+      +thumb
+      +'<span class="nov-art">'+esc(art)+'</span>'
+      +(o.title?('<span class="nov-name">'+esc(o.title)+'</span>'):'')
+      +wb
+      +'<select class="nov-status-sel" data-art="'+esc(art)+'" data-s="'+esc(st)+'">'+novStatusOptions(st)+'</select>'
+      +'<input class="nov-date'+(over?' overdue':'')+'" type="date" data-art="'+esc(art)+'" value="'+esc(o.launch_date||"")+'" title="План: дата запуска">'
+      +'<div class="nov-bar nov-grow"><div class="nov-bar-fill" style="width:'+pct+'%"></div></div>'
       +'<span class="nov-count" style="font-size:12px;color:var(--ink-2)">'+done+'/'+all.length+'</span>'
-      +'<div class="nov-bar"><div class="nov-bar-fill" style="width:'+pct+'%"></div></div>'
-      +'<button class="btn secondary sm nov-del" data-art="'+esc(art)+'" type="button">Удалить</button></div>';
-    var scheme='<div style="margin-top:14px">'+NOVELTY_STAGES.map(function(st,i){return novStageHtml(art,st,i);}).join("")+'</div>';
-    return '<details class="block nov-card"'+(items.length===1?' open':'')+'><summary>'+head+'</summary>'+scheme+'</details>';
+      +'<span class="nov-pct">'+pct+'%</span>'
+      +'<button class="btn secondary sm nov-remind" data-art="'+esc(art)+'" type="button" title="Поставить задачу-напоминание Татьяне в Bitrix">🔔 Татьяне</button>'
+      +'<button class="btn secondary sm nov-del" data-art="'+esc(art)+'" type="button">Удалить</button>'
+      +'</div>';
+    var scheme='<div class="nov-bodywrap">'+NOVELTY_STAGES.map(function(s,i){return novStageHtml(art,s,i);}).join("")+'</div>';
+    return '<div class="block nov-card" data-art="'+esc(art)+'">'+head+scheme+'</div>';
   }).join("");
-  $("novList").querySelectorAll('input[type=checkbox][data-key]').forEach(function(cb){
-    cb.addEventListener("change",function(){ novToggle(cb); });
-  });
-  $("novList").querySelectorAll(".nov-del").forEach(function(b){
-    b.addEventListener("click",function(e){ e.preventDefault(); e.stopPropagation(); novRemoveArm(b); });
-  });
+  $("novList").querySelectorAll('input[type=checkbox][data-key]').forEach(function(cb){ cb.addEventListener("change",function(){ novToggle(cb); }); });
+  $("novList").querySelectorAll(".nov-del").forEach(function(b){ b.addEventListener("click",function(e){ e.stopPropagation(); novRemoveArm(b); }); });
+  $("novList").querySelectorAll(".nov-remind").forEach(function(b){ b.addEventListener("click",function(){ novRemind(b.dataset.art); }); });
+  $("novList").querySelectorAll(".nov-status-sel").forEach(function(s){ s.addEventListener("change",function(){ novSetStatus(s); }); });
+  $("novList").querySelectorAll(".nov-date").forEach(function(d){ d.addEventListener("change",function(){ novSetDate(d); }); });
+  $("novList").querySelectorAll(".nov-toggle").forEach(function(b){ b.addEventListener("click",function(){ var c=b.closest(".nov-card"); c.classList.toggle("collapsed"); b.textContent=c.classList.contains("collapsed")?"▸":"▾"; fit(); }); });
   fit();
 }
-function novUpdateProgress(det,art){
+function novUpdateProgress(card,art){
   var checks=NOV_DATA.checks[art]||{}, all=novAllKeys();
   var done=all.filter(function(k){return checks[k]&&checks[k].checked;}).length;
-  var fill=det.querySelector(".nov-bar-fill"); if(fill) fill.style.width=(all.length?Math.round(done*100/all.length):0)+"%";
-  var cnt=det.querySelector(".nov-count"); if(cnt) cnt.textContent=done+"/"+all.length;
-  var stages=det.querySelectorAll(".nov-stage");
+  var pct=all.length?Math.round(done*100/all.length):0;
+  var fill=card.querySelector(".nov-bar-fill"); if(fill) fill.style.width=pct+"%";
+  var cnt=card.querySelector(".nov-count"); if(cnt) cnt.textContent=done+"/"+all.length;
+  var pc=card.querySelector(".nov-pct"); if(pc) pc.textContent=pct+"%";
+  var stages=card.querySelectorAll(".nov-stage");
   NOVELTY_STAGES.forEach(function(st,i){
     var its=stageItemKeys(st), d=its.filter(function(k){return checks[k]&&checks[k].checked;}).length;
     var num=stages[i]&&stages[i].querySelector(".nov-num");
     if(num) num.classList.toggle("done", its.length>0&&d===its.length);
   });
+  var dInp=card.querySelector(".nov-date");
+  if(dInp){ dInp.classList.toggle("overdue", novOverdue(novItemByArt(art),done,all.length)); }
+}
+function novSetStatus(sel){
+  var art=sel.dataset.art, v=sel.value;
+  sel.dataset.s=v;
+  var o=novItemByArt(art); if(o){ o.status=v; o.status_by=CURRENT_USER||""; }
+  api("/api/novelty/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({article:art,status:v,by:CURRENT_USER})})
+    .then(function(j){ if(!j||!j.ok) showStatus($("novStatus"),false,"Статус не сохранён"); })
+    .catch(function(){ showStatus($("novStatus"),false,"Нет связи — статус не сохранён"); });
+}
+function novSetDate(inp){
+  var art=inp.dataset.art, v=inp.value;
+  var o=novItemByArt(art); if(o) o.launch_date=v;
+  inp.classList.toggle("overdue", novOverdue(o,novProgress(art),novAllKeys().length));
+  api("/api/novelty/date",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({article:art,launch_date:v})})
+    .then(function(j){ if(!j||!j.ok) showStatus($("novStatus"),false,"Дата не сохранена"); })
+    .catch(function(){ showStatus($("novStatus"),false,"Нет связи — дата не сохранена"); });
+}
+function novRemind(art){
+  if(typeof BX24==="undefined"){ showStatus($("novStatus"),false,"Напоминание ставится только внутри Bitrix24."); return; }
+  var checks=NOV_DATA.checks[art]||{};
+  var pending=novAllKeys().filter(function(k){return !(checks[k]&&checks[k].checked);}).map(function(k){return NOV_LABELS[k];}).filter(Boolean);
+  var o=novItemByArt(art);
+  var desc="Новинка "+art+(o&&o.title?(" ("+o.title+")"):"")+"\n"
+    +(o&&o.launch_date?("План запуска: "+o.launch_date+"\n"):"")
+    +"\nНе забыть по чек-листу запуска. Осталось ("+pending.length+"):\n"
+    +(pending.length?("- "+pending.slice(0,25).join("\n- ")+(pending.length>25?("\n…и ещё "+(pending.length-25)):"")):"всё выполнено ✅");
+  try{
+    BX24.callMethod("tasks.task.add",{fields:{
+      TITLE:"Новинка "+art+": не забыть по чек-листу запуска",
+      DESCRIPTION:desc, RESPONSIBLE_ID:TATYANA_RESPONSIBLE_ID
+    }},function(res){
+      try{ if(res.error()) showStatus($("novStatus"),false,"Не удалось поставить задачу Татьяне: "+res.error());
+        else { var t=(res.data()||{}).task||{}; var id=t.id||t.ID||""; showStatus($("novStatus"),true,"🔔 Напоминание Татьяне поставлено"+(id?(" (№"+id+")"):"")+"."); } }catch(e){}
+      fit();
+    });
+  }catch(e){ showStatus($("novStatus"),false,"Ошибка постановки задачи"); }
 }
 function novToggle(cb){
   var art=cb.dataset.art, key=cb.dataset.key, on=cb.checked;
@@ -1626,7 +1734,7 @@ function novToggle(cb){
     if(on){ if(!meta){ meta=document.createElement("span"); meta.className="nov-meta"; lab.appendChild(meta); } meta.textContent=(CURRENT_USER||"вы")+" · сейчас"; }
     else if(meta){ meta.remove(); }
   }
-  var det=cb.closest("details"); if(det) novUpdateProgress(det,art);
+  var card=cb.closest(".nov-card"); if(card) novUpdateProgress(card,art);
   api("/api/novelty/check",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({article:art,key:key,checked:on,by:CURRENT_USER})})
     .then(function(j){ if(!j||!j.ok) showStatus($("novStatus"),false,"Отметку не удалось сохранить — обновите страницу"); })
     .catch(function(){ showStatus($("novStatus"),false,"Нет связи с сервером — отметка не сохранена"); });
@@ -1657,6 +1765,11 @@ $("novAddBtn").addEventListener("click",async function(){
 $("novArt").addEventListener("keydown",function(e){ if(e.key==="Enter"){ e.preventDefault(); $("novAddBtn").click(); } });
 $("novTitle").addEventListener("keydown",function(e){ if(e.key==="Enter"){ e.preventDefault(); $("novAddBtn").click(); } });
 $("novReloadBtn").addEventListener("click",function(){ spinOn($("novReloadBtn"),true,"Обновляю…"); loadNovelty().finally(function(){ spinOn($("novReloadBtn"),false,"Обновить"); }); });
+/* фильтры/поиск/сортировка новинок */
+(function(){ var f=$("novFilterStatus"); if(f) f.innerHTML='<option value="">Все статусы</option>'+NOV_STATUSES.map(function(s){return '<option value="'+s.v+'">'+s.label+'</option>';}).join(""); })();
+$("novFilterStatus").addEventListener("change",function(){ if(NOV_DATA) renderNovelty(); });
+$("novSearch").addEventListener("input",function(){ if(NOV_DATA) renderNovelty(); });
+$("novSort").addEventListener("change",function(){ if(NOV_DATA) renderNovelty(); });
 
 /* инструкция */
 $("heroHelp").addEventListener("click",function(){ $("helpOvl").classList.add("show"); });

@@ -169,12 +169,21 @@ def init_db():
         # Чек-лист запуска новинок: список артикулов-новинок и отметки по пунктам
         cur.execute("""
             CREATE TABLE IF NOT EXISTS novelty_items (
-                article    TEXT PRIMARY KEY,
-                title      TEXT,
-                created_by TEXT,
-                created_at BIGINT
+                article     TEXT PRIMARY KEY,
+                title       TEXT,
+                created_by  TEXT,
+                created_at  BIGINT,
+                status      TEXT,
+                status_by   TEXT,
+                status_at   BIGINT,
+                launch_date TEXT
             )
         """)
+        # на случай, если таблица уже была без новых колонок
+        cur.execute("ALTER TABLE novelty_items ADD COLUMN IF NOT EXISTS status TEXT")
+        cur.execute("ALTER TABLE novelty_items ADD COLUMN IF NOT EXISTS status_by TEXT")
+        cur.execute("ALTER TABLE novelty_items ADD COLUMN IF NOT EXISTS status_at BIGINT")
+        cur.execute("ALTER TABLE novelty_items ADD COLUMN IF NOT EXISTS launch_date TEXT")
         cur.execute("""
             CREATE TABLE IF NOT EXISTS novelty_checks (
                 article    TEXT,
@@ -257,12 +266,16 @@ def db_set_rec_status(vendor_code, status, by=""):
         return False
 
 def db_novelty_get():
-    """Чек-лист новинок: {items:[{article,title,by,at}], checks:{article:{key:{checked,by,at}}}}."""
+    """Чек-лист новинок: items с title/статусом/датой + checks по пунктам."""
     try:
         conn = get_db()
         cur = conn.cursor()
-        cur.execute("SELECT article, title, created_by, created_at FROM novelty_items ORDER BY created_at DESC")
-        items = [{"article": r[0], "title": r[1] or "", "by": r[2] or "", "at": r[3] or 0}
+        cur.execute("""SELECT article, title, created_by, created_at,
+                              status, status_by, status_at, launch_date
+                       FROM novelty_items ORDER BY created_at DESC""")
+        items = [{"article": r[0], "title": r[1] or "", "by": r[2] or "", "at": r[3] or 0,
+                  "status": r[4] or "new", "status_by": r[5] or "", "status_at": r[6] or 0,
+                  "launch_date": r[7] or ""}
                  for r in cur.fetchall()]
         cur.execute("SELECT article, item_key, checked, updated_by, updated_at FROM novelty_checks")
         checks = {}
@@ -313,6 +326,53 @@ def db_novelty_remove(article):
         return True
     except Exception as e:
         print(f"Ошибка db_novelty_remove: {e}")
+        return False
+
+def db_novelty_set_status(article, status, by=""):
+    article = (article or "").strip()
+    if not article:
+        return False
+    status = (status or "").strip()[:40]
+    by = (by or "").strip()[:120]
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO novelty_items (article, status, status_by, status_at, created_at)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (article)
+            DO UPDATE SET status = EXCLUDED.status,
+                          status_by = EXCLUDED.status_by,
+                          status_at = EXCLUDED.status_at
+        """, (article, status, by, int(time.time()), int(time.time())))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Ошибка db_novelty_set_status: {e}")
+        return False
+
+def db_novelty_set_date(article, launch_date):
+    article = (article or "").strip()
+    if not article:
+        return False
+    launch_date = (launch_date or "").strip()[:20]
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO novelty_items (article, launch_date, created_at)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (article)
+            DO UPDATE SET launch_date = EXCLUDED.launch_date
+        """, (article, launch_date, int(time.time())))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"Ошибка db_novelty_set_date: {e}")
         return False
 
 def db_novelty_set_check(article, item_key, checked, by=""):
@@ -1794,11 +1854,47 @@ def api_rec_status_set():
 
 # ===================== ЧЕК-ЛИСТ ЗАПУСКА НОВИНОК =====================
 
+_nov_wb_cache = {"ts": 0.0, "cards": []}
+_NOV_WB_TTL = 300
+
+def _novelty_enrich(items):
+    """Добавляет к новинкам фото, nmID и ссылку на карточку WB по артикулу."""
+    if not items:
+        return items
+    try:
+        now = time.time()
+        if now - _nov_wb_cache["ts"] > _NOV_WB_TTL or not _nov_wb_cache["cards"]:
+            _nov_wb_cache["cards"] = wb_fetch_cards(text_search="", limit=100, max_cards=2000)
+            _nov_wb_cache["ts"] = now
+        by_vc = {}
+        for c in _nov_wb_cache["cards"]:
+            vc = (c.get("vendorCode") or "")
+            if vc:
+                by_vc[vc.lower()] = c
+        for it in items:
+            art = (it.get("article") or "").lower()
+            match = by_vc.get(art)
+            if not match:  # новинка хранится без цвета (J09018), а на WB — J09018/чёрный
+                for vc, c in by_vc.items():
+                    if vc.split("/")[0] == art or vc.startswith(art + "/"):
+                        match = c
+                        break
+            if match:
+                it["photo"] = _first_photo_url(match)
+                it["nmID"] = match.get("nmID")
+                it["wb_url"] = f"https://www.wildberries.ru/catalog/{match.get('nmID')}/detail.aspx" if match.get("nmID") else ""
+                if not it.get("title"):
+                    it["title"] = match.get("title") or ""
+    except Exception as e:
+        print(f"Ошибка _novelty_enrich: {e}")
+    return items
+
 @app.route("/api/novelty", methods=["GET"])
 def api_novelty_get():
     """Список новинок и отметки по пунктам чек-листа (общие для всех)."""
     data = db_novelty_get()
-    return jsonify({"ok": True, "items": data["items"], "checks": data["checks"]})
+    items = _novelty_enrich(data["items"])
+    return jsonify({"ok": True, "items": items, "checks": data["checks"]})
 
 @app.route("/api/novelty/add", methods=["POST"])
 def api_novelty_add():
@@ -1821,6 +1917,20 @@ def api_novelty_check():
                             data.get("checked"), data.get("by")):
         return jsonify({"ok": True})
     return jsonify({"ok": False, "error": "Не удалось сохранить отметку"}), 400
+
+@app.route("/api/novelty/status", methods=["POST"])
+def api_novelty_status():
+    data = request.get_json(silent=True) or {}
+    if db_novelty_set_status(data.get("article"), data.get("status"), data.get("by")):
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "Не удалось сохранить статус"}), 400
+
+@app.route("/api/novelty/date", methods=["POST"])
+def api_novelty_date():
+    data = request.get_json(silent=True) or {}
+    if db_novelty_set_date(data.get("article"), data.get("launch_date")):
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "Не удалось сохранить дату"}), 400
 
 def _to_int_list(v):
     out = []
