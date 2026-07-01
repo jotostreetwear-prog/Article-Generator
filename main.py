@@ -82,6 +82,20 @@ try:
 except Exception:
     SEASON_BUYOUT_DAYS = 60
 
+# Keep-online: приложение крутится 24/7 на сервере и хранит OAuth-токен
+# установившего его пользователя. Раз в KEEP_ONLINE_EVERY_MIN минут оно от его
+# имени пингует портал (user.current обновляет LAST_ACTIVITY_DATE → зелёный
+# индикатор «в сети»; im.user.status.set держит статус online). Так статус
+# остаётся онлайн, даже когда компьютер владельца выключен или спит.
+# ВАЖНО: онлайн держится у владельца токена (того, кто ставил приложение).
+KEEP_ONLINE_ENABLED = os.environ.get("KEEP_ONLINE_ENABLED", "1").strip().lower() not in ("", "0", "false", "no")
+try:
+    KEEP_ONLINE_EVERY_MIN = max(1, int(os.environ.get("KEEP_ONLINE_EVERY_MIN", "1") or 1))
+except Exception:
+    KEEP_ONLINE_EVERY_MIN = 1
+# Необязательное окно активности в часах МСК (например "9-21"). Пусто = круглосуточно.
+KEEP_ONLINE_HOURS = os.environ.get("KEEP_ONLINE_HOURS", "").strip()
+
 def is_silent_dialog(dialog_id):
     """Чаты только для отчётов/алертов: бот туда пишет сам, но не приветствует
     и не ведёт диалог по созданию артикулов (например, чат отдела продаж)."""
@@ -3817,6 +3831,72 @@ def report_now():
     threading.Thread(target=generate_report).start()
     return jsonify({"ok": True, "message": "Отчёт генерируется"})
 
+# ===================== KEEP ONLINE =====================
+
+def _keep_online_in_window():
+    """True, если сейчас попадаем в окно KEEP_ONLINE_HOURS (часы МСК).
+    Пустая настройка = круглосуточно."""
+    win = KEEP_ONLINE_HOURS
+    if not win:
+        return True
+    try:
+        start_s, end_s = win.split("-", 1)
+        start_h, end_h = int(start_s), int(end_s)
+    except Exception:
+        return True  # некорректная настройка — не мешаем работе
+    msk_hour = (time.gmtime().tm_hour + 3) % 24  # сервер в UTC, МСК = UTC+3
+    if start_h <= end_h:
+        return start_h <= msk_hour < end_h
+    return msk_hour >= start_h or msk_hour < end_h  # окно через полночь
+
+def keep_online():
+    """Держит владельца OAuth-токена «в сети»: пингует портал от его имени,
+    чтобы LAST_ACTIVITY_DATE был свежим, а статус мессенджера — online."""
+    if not KEEP_ONLINE_ENABLED:
+        return
+    if not load_oauth():
+        return  # приложение ещё не установлено — нечем ходить в REST
+    if not _keep_online_in_window():
+        return
+    try:
+        me = bx_call("user.current") or {}
+        try:
+            bx_call("im.user.status.set", {"STATUS": "online"})
+        except Exception as e:
+            # статус мессенджера — не критично; активность уже обновлена вызовом выше
+            print(f"[KEEP-ONLINE] im.user.status.set пропущен: {e}")
+        print(f"[KEEP-ONLINE] пинг ОК: user #{me.get('ID')} ({me.get('NAME')} {me.get('LAST_NAME')}), IS_ONLINE={me.get('IS_ONLINE')}")
+    except Exception as e:
+        print(f"[KEEP-ONLINE] ошибка пинга: {e}")
+
+@app.route("/keep-online-now", methods=["GET"])
+def keep_online_now():
+    """Ручная проверка: делает пинг и возвращает, кого именно держим онлайн."""
+    if not load_oauth():
+        return jsonify({"ok": False, "error": "Bitrix OAuth не настроен"}), 400
+    try:
+        me = bx_call("user.current") or {}
+        status_ok, status_err = True, None
+        try:
+            bx_call("im.user.status.set", {"STATUS": "online"})
+        except Exception as e:
+            status_ok, status_err = False, str(e)
+        return jsonify({
+            "ok": True,
+            "enabled": KEEP_ONLINE_ENABLED,
+            "every_min": KEEP_ONLINE_EVERY_MIN,
+            "hours": KEEP_ONLINE_HOURS or "24/7",
+            "in_window": _keep_online_in_window(),
+            "user_id": me.get("ID"),
+            "name": f"{me.get('NAME','')} {me.get('LAST_NAME','')}".strip(),
+            "is_online": me.get("IS_ONLINE"),
+            "last_activity": me.get("LAST_ACTIVITY_DATE"),
+            "status_set_ok": status_ok,
+            "status_set_error": status_err,
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 # ===================== ЗАПУСК =====================
 
 def run_scheduler():
@@ -3825,11 +3905,16 @@ def run_scheduler():
     schedule.every().day.at("06:00").do(send_seasonal_report)  # 09:00 МСК, ежедневно
     schedule.every(5).minutes.do(warm_wb_cache)           # фоновое обновление данных WB
     warm_wb_cache()                                       # прогрев сразу при старте
+    if KEEP_ONLINE_ENABLED:
+        schedule.every(KEEP_ONLINE_EVERY_MIN).minutes.do(keep_online)  # держим владельца токена «в сети»
+        keep_online()                                     # пинг сразу при старте
     print("Планировщик запущен:")
     print("  - CTR проверка каждый день в 09:00 МСК")
     print("  - Отчёт по задачам каждый день в 18:00 МСК")
     print("  - Отчёт по сезонной распродаже каждый день в 09:00 МСК")
     print("  - Прогрев данных WB каждые 5 минут")
+    if KEEP_ONLINE_ENABLED:
+        print(f"  - Keep-online пинг каждые {KEEP_ONLINE_EVERY_MIN} мин ({KEEP_ONLINE_HOURS or '24/7'} МСК)")
     while True:
         schedule.run_pending()
         time.sleep(30)
